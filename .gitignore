@@ -1,0 +1,17 @@
+.env
+state/
+__pycache__/
+*.pyc
+.venv/
+downloads/
+temp/
+wvd/
+*.session
+*.session-journal
+data/
+# never commit user secrets, even if STATE_DIR/COOKIES_DIR/WVD_DIR is pointed inside the repo
+*.wvd
+*.prd
+cookies/
+accounts.json
+users.json

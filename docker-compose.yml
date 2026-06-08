@@ -1,0 +1,11 @@
+services:
+  unshackle-tg:
+    build: .
+    image: ghcr.io/avi-dev-user/unshackle-tg:latest
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      # Persistent state, cookies, downloads, logs.
+      - ./data:/data
+      # Bring your own CDM device(s) here. Never commit them.
+      - ./wvd:/data/wvd
