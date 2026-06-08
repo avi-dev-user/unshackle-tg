@@ -1,0 +1,14 @@
+.venv/
+state/
+.env
+downloads/
+temp/
+wvd/
+.git/
+__pycache__/
+*.pyc
+*.session
+*.session-journal
+tests/
+.github/
+*.md

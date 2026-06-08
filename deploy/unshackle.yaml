@@ -1,0 +1,42 @@
+# unshackle engine config. Container paths (see README).
+# Discovered via the installed package dir (HOME-independent, baked by the Dockerfile).
+tag: WEB
+tag_group_name: true
+unicode_filenames: true
+
+directories:
+  downloads: "/data/downloads"
+  temp: "/data/temp"
+  wvds: "/data/wvd"                # Bring your own CDM device(s); mounted at /data/wvd, never baked in.
+  cookies: "/data/cookies"         # Per-user cookies: <SERVICE>/<profile>.txt (key is 'cookies', plural).
+  logs: "/data/logs"
+  services:
+    - "/app/services"              # Built-in example services (JSON, TEST).
+    # Add your own service directory by mounting it and listing it here, e.g.:
+    # - "/app/services-extra"
+
+# Geofenced services (GEOFENCE=("XX",)) route their manifest/license fetch through the matching
+# region proxy. Add yours here, for example:
+# proxy_providers:
+#   basic:
+#     IL: "http://user:pass@host:port"
+
+cdm:
+  # Map a service (or default) to a CDM device name present in directories.wvds.
+  default: my_l3_device
+
+# Decryptor. shaka-packager is the default (preferred for modern CENC). A service may switch to
+# mp4decrypt per content at runtime (e.g. Smooth/PIFF, which can crash shaka).
+decryption:
+  DEFAULT: shaka
+
+# REST API server (unshackle serve). The bot is the only client and reaches the engine over a
+# loopback address, so it is trusted to select which uploaded CDM device a job uses.
+serve:
+  cdm_overrides: true              # Allow a per-request `cdm` override (denied by default otherwise).
+  # allow_job_credentials: true    # Allow a per-request `credential` (denied by default otherwise).
+
+output_template:
+  movies: '{title}.{year}.{repack?}.{edition?}.{quality}.{source}.WEB-DL.{dual?}.{multi?}.{audio_full}.{atmos?}.{hdr?}.{hfr?}.{video}-{tag}'
+  series: '{title}.{year?}.{season_episode}.{episode_name?}.{repack?}.{edition?}.{quality}.{source}.WEB-DL.{dual?}.{multi?}.{audio_full}.{atmos?}.{hdr?}.{hfr?}.{video}-{tag}'
+  songs: '{track_number}.{title}.{repack?}.{edition?}.{source?}.WEB-DL.{audio_full}.{atmos?}-{tag}'
