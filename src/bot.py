@@ -18,7 +18,7 @@ import time
 import aiohttp
 
 from . import admin, auth, config, monitors, state, uploader, users
-from .catalog_meta import detect_service, load_cat_overrides, set_cat_override, unwrap_url
+from .catalog_meta import detect_service, load_cat_overrides, set_cat_override, svc_needs_auth, unwrap_url
 from .download import download_file, start_download, to_sel
 from .errors import report_error
 from .i18n import tr
@@ -96,6 +96,11 @@ async def on_callback(cq: dict):
     if data.startswith("srch:"):
         tag = data.split(":", 1)[1]
         s = sess(uid)
+        # A service that requires sign-in with no connected account: don't start a search.
+        # The query would just fail at authenticate, and repeated blind logins risk the
+        # account/IP being blocked. Send the user to connect the account first.
+        if svc_needs_auth(tag) and not auth.list_accounts(uid, tag):
+            return await account_service(chat, uid, mid, tag)
         s["search_service"] = tag
         s["step"] = "await_search"
         back = "m:subs" if s.get("subs_mode") else "m:search"
