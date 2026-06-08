@@ -175,6 +175,10 @@ async def show_titles(chat: int, uid: int, title_id: str):
                           [[(tr("MENU", lang), "m:main")]])
     m = await send(chat, tr("LOADING", lang))
     mid = m["result"]["message_id"]
+    # creds-required service with no connected account: send the user to connect it rather
+    # than letting list_titles fail at authenticate (and risk a blocked login).
+    if svc_needs_auth(service) and not auth.list_accounts(uid, service):
+        return await account_service(chat, uid, mid, service)
     try:
         titles = await engine.list_titles(service, title_id, profile=str(uid))
     except UnshackleError as e:
