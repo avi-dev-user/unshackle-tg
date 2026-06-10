@@ -275,7 +275,10 @@ async def show_tracks(chat: int, uid: int, mid: int, wanted):
     subs = tracks.get("subtitles", []) if isinstance(tracks, dict) else []
     s["ns"] = len(subs)
     s["sub_langs"] = sorted({x.get("language") for x in subs if x.get("language")})
-    s["name"] = tracks.get("title", {}).get("name", "") if isinstance(tracks, dict) else ""
+    _t = tracks.get("title", {}) if isinstance(tracks, dict) else {}
+    s["name"] = _t.get("name", "")
+    s["description"] = _t.get("description") or ""   # synopsis + air date for the rich caption
+    s["upload_date"] = _t.get("date") or ""
     # rich context line shown on every downstream wizard screen
     se_m = re.match(r"S(\d+)(?:E(\d+))?$", str(wanted)) if wanted else None
     series = (titles[0].get("series_title") if titles else "") or ""

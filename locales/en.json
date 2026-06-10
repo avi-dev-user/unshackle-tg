@@ -282,5 +282,13 @@
   "YOU_DON_HAVE_PERMISSION_4": "🚫 You don't have permission for the {service} service.",
   "YOU_HAVE_SHARED_DEFAULT": "You have a shared (default) CDM from the admin.",
   "YOU_RE_ALREADY_DOWNLOADING": "You're already downloading {limit} items at once (your maximum). Wait for them to finish or cancel one in 📥 My downloads.",
-  "FILTER_ALL": "All"
+  "FILTER_ALL": "All",
+  "CAP_UPLOAD_DATE": "Upload Date",
+  "CAP_ORIGINAL_POST": "Original post",
+  "CAP_DIMENSION": "Dimension",
+  "CAP_MODE": "Mode",
+  "CAP_LANDSCAPE": "Landscape",
+  "CAP_PORTRAIT": "Portrait",
+  "CAP_AUDIO": "Audio",
+  "CAP_SUBTITLES_CAP": "Subtitles"
 }

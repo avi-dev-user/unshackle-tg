@@ -282,5 +282,13 @@
   "YOU_DON_HAVE_PERMISSION_4": "🚫 אין לך הרשאה לשירות {service}.",
   "YOU_HAVE_SHARED_DEFAULT": "יש לך CDM משותף (ברירת מחדל) מאת המנהל.",
   "YOU_RE_ALREADY_DOWNLOADING": "אתה כבר מוריד {limit} פריטים במקביל (המקסימום שלך). המתן שיסתיימו או בטל אחד ב-📥 ההורדות שלי.",
-  "FILTER_ALL": "הכל"
+  "FILTER_ALL": "הכל",
+  "CAP_UPLOAD_DATE": "תאריך העלאה",
+  "CAP_ORIGINAL_POST": "מקור",
+  "CAP_DIMENSION": "ממדים",
+  "CAP_MODE": "מצב",
+  "CAP_LANDSCAPE": "לרוחב",
+  "CAP_PORTRAIT": "לאורך",
+  "CAP_AUDIO": "אודיו",
+  "CAP_SUBTITLES_CAP": "כתוביות"
 }
