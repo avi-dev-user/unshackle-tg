@@ -33,6 +33,10 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 API_ID = int(os.environ.get("API_ID") or 0)
 API_HASH = os.environ.get("API_HASH", "")
 PREMIUM_SESSION = os.environ.get("PREMIUM_SESSION", "")
+# Optional local telegram-bot-api server for uploads up to 2GB. When set, files <=2GB are sent
+# through it (HTTP), which resolves the recipient natively (no MTProto peer/access_hash issue
+# the Pyrogram bot client hits). >2GB still goes through the Premium user client.
+BOT_API_BASE = os.environ.get("UPLOAD_BOT_API_BASE", "").rstrip("/")
 ADMIN_IDS = _ids("ADMIN_IDS")
 
 # --- unshackle REST API ---

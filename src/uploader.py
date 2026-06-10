@@ -13,6 +13,8 @@ import re
 import subprocess
 from glob import glob
 
+import aiohttp
+
 from pyrogram import Client
 from pyrogram.enums import ParseMode
 
@@ -146,25 +148,102 @@ def _make_video_thumb(path: str, duration: int = 0) -> str | None:
 
 
 async def _ensure_peer(client, chat_id: int) -> None:
-    """The bot uploader runs with no_updates=True, so it never caches peers from updates; a
-    user/chat it hasn't met this session then fails with PEER_ID_INVALID (e.g. right after a
-    restart with a fresh session). Resolve it: seeding a user with access_hash 0 is NOT enough -
-    Telegram rejects SendMedia with a 0 hash. So seed 0, then read the peer (get_users /
-    get_chat), which makes Telegram return the real access_hash (answered for a bot messaging a
-    user that has started it) and caches it. Best-effort - never raises."""
+    """Make `chat_id` resolvable for SendMedia. The uploader is a no_updates bot, so it never
+    learns peers from updates, and a user seeded with access_hash 0 still 400s on SendMedia
+    (Telegram rejects a 0 hash). So for a user: seed 0 so the peer can be referenced, then call
+    get_users(), which returns the REAL access_hash for a user that has started the bot and
+    caches it. We do NOT early-return on a resolvable peer: a stale 0-hash left in a persistent
+    session would satisfy resolve_peer yet keep failing the send, so always refresh via
+    get_users. Best-effort - never raises."""
     try:
-        await client.resolve_peer(chat_id)
-        return                                   # already cached
-    except Exception:
-        pass
-    try:
-        if chat_id > 0:                          # user: seed hash 0, then upgrade to the real hash
-            await client.storage.update_peers([(chat_id, 0, "user", None, None)])
-            await client.get_users(chat_id)      # users.getUsers caches the REAL access_hash
+        if chat_id > 0:                          # user DM
+            try:
+                await client.storage.update_peers([(chat_id, 0, "user", None, None)])
+            except Exception:
+                pass
+            await client.get_users(chat_id)      # users.getUsers -> caches the REAL access_hash
         else:                                    # channel/group: fetching caches its access_hash
             await client.get_chat(chat_id)
     except Exception as e:
         print(f"uploader: could not resolve peer {chat_id} ({type(e).__name__}): {e}")
+
+
+async def _send_via_botapi(chat_id: int, path: str, caption: str, cover: str | None,
+                           force_kind: str | None, lang: str) -> None:
+    """Send a file (<=2GB) through a local telegram-bot-api server (config.BOT_API_BASE).
+    Unlike the MTProto bot client, the HTTP Bot API resolves a recipient that has started the
+    bot natively, so there is no PEER_ID_INVALID. The file is streamed (aiohttp reads the open
+    handle in chunks), so a multi-GB upload doesn't load into memory."""
+    info = metadata._ffprobe(path)
+    kind = metadata.media_kind(path)
+    if force_kind == "file":
+        kind = "document"
+    elif force_kind == "video" and kind != "music":
+        kind = "video"
+    tags = {}
+    for st in info.get("streams", []):
+        if st.get("codec_type") == "audio":
+            tags.update(st.get("tags") or {})
+    tags.update((info.get("format", {}) or {}).get("tags") or {})
+    title = metadata._expand_se(tags.get("title") or "", lang)
+    ext = metadata.audio_ext(path) if kind == "music" else ""
+    fname = _clean_name(path, title, ext)
+
+    method = {"video": "sendVideo", "music": "sendAudio"}.get(kind, "sendDocument")
+    field = {"video": "video", "music": "audio"}.get(kind, "document")
+    form = aiohttp.FormData()
+    form.add_field("chat_id", str(chat_id))
+    form.add_field("caption", caption or "")
+    form.add_field("parse_mode", "HTML")
+    thumb = None
+    if kind == "video":
+        vw = vh = 0
+        for st in info.get("streams", []):
+            if st.get("codec_type") == "video" and not (st.get("disposition", {}) or {}).get("attached_pic"):
+                vw, vh = st.get("width") or 0, st.get("height") or 0
+                break
+        vdur = int(float((info.get("format", {}) or {}).get("duration") or 0))
+        if vw:
+            form.add_field("width", str(vw))
+        if vh:
+            form.add_field("height", str(vh))
+        if vdur:
+            form.add_field("duration", str(vdur))
+        form.add_field("supports_streaming", "true")
+        thumb = cover or _make_video_thumb(path, vdur)
+    elif kind == "music":
+        dur = int(float((info.get("format", {}) or {}).get("duration") or 0))
+        if dur:
+            form.add_field("duration", str(dur))
+        if title:
+            form.add_field("title", title)
+        perf = tags.get("artist") or tags.get("album_artist") or ""
+        if perf:
+            form.add_field("performer", perf)
+        thumb = cover
+    else:
+        thumb = cover
+
+    handles = [open(path, "rb")]
+    form.add_field(field, handles[0], filename=fname)
+    if thumb and os.path.exists(thumb):
+        handles.append(open(thumb, "rb"))
+        form.add_field("thumbnail", handles[-1], filename="thumb.jpg")
+    url = f"{config.BOT_API_BASE}/bot{config.BOT_TOKEN}/{method}"
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=7200)) as s:
+            async with s.post(url, data=form) as r:
+                res = await r.json(content_type=None)
+        if not isinstance(res, dict) or not res.get("ok"):
+            raise RuntimeError(f"Bot API {method} failed: {(res or {}).get('description', res)}")
+    finally:
+        for h in handles:
+            try:
+                h.close()
+            except Exception:
+                pass
+        if kind == "video" and thumb and thumb != cover and os.path.exists(thumb):
+            os.remove(thumb)
 
 
 async def send(chat_id: int, path: str, caption: str, cover: str | None = None,
@@ -172,16 +251,19 @@ async def send(chat_id: int, path: str, caption: str, cover: str | None = None,
     """Send the downloaded file with the right method + caption (+ cover for music).
     force_kind: 'video' → streamable video, 'file' → document (both keep a thumbnail).
     progress(current, total) is Pyrogram's real-time upload callback."""
-    if _app is None:
-        raise RuntimeError("uploader not started (missing API_ID/API_HASH)")
-    # pick the client by size: bot ≤2GB, Premium user up to 4GB
     size = os.path.getsize(path) if os.path.exists(path) else 0
+    # <=2GB through the local Bot API server (resolves the recipient natively - no PEER_ID_INVALID).
+    # Only >2GB needs the MTProto Premium user client.
+    if 0 < size <= BOT_LIMIT and config.BOT_API_BASE:
+        return await _send_via_botapi(chat_id, path, caption, cover, force_kind, lang)
     if size > BOT_LIMIT:
         if _premium is None:
             raise RuntimeError("The file is larger than 2GB - a Premium account (PREMIUM_SESSION) "
                                "is required. Choose a lower quality for now.")
         client = _premium
     else:
+        if _app is None:
+            raise RuntimeError("uploader not started (missing API_ID/API_HASH)")
         client = _app
     await _ensure_peer(client, chat_id)   # avoid PEER_ID_INVALID on an unmet peer (fresh session)
     kind = metadata.media_kind(path)
@@ -252,14 +334,16 @@ async def send(chat_id: int, path: str, caption: str, cover: str | None = None,
 
 async def deliver(chat_id: int, path: str, service: str = "", source_url: str = "",
                   media_url: str = "", progress=None, force_kind: str | None = None,
-                  cover_path: str | None = None, lang: str = "en") -> None:
+                  cover_path: str | None = None, lang: str = "en",
+                  display_title: str = "", description: str = "", upload_date: str = "") -> None:
     """Build caption + cover, send, then delete the local file (and empty parent dir).
     media_url = the direct source file (e.g. the episode's mp3) → enriches music
     tags/cover that the .mka remux dropped. progress = real-time upload callback."""
     if not await start():            # lazy (re)start - e.g. after a FLOOD_WAIT cleared
         raise RuntimeError("uploader unavailable (FloodWait or missing API_ID/HASH) - try again shortly")
     caption = metadata.build_caption(path, service_name=service, source_url=source_url,
-                                     media_url=media_url, lang=lang)
+                                     media_url=media_url, lang=lang, display_title=display_title,
+                                     description=description, upload_date=upload_date)
     # a per-monitor fixed cover wins; otherwise pull an embedded cover for music
     cover = cover_path if (cover_path and os.path.exists(cover_path)) else None
     if cover is None and metadata.media_kind(path) == "music":
