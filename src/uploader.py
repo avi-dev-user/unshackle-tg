@@ -145,6 +145,25 @@ def _make_video_thumb(path: str, duration: int = 0) -> str | None:
     return None
 
 
+async def _ensure_peer(client, chat_id: int) -> None:
+    """The bot uploader runs with no_updates=True, so it never caches peers from updates;
+    a user/chat it hasn't met this session then fails with PEER_ID_INVALID (e.g. right after
+    a restart with a fresh session). If the peer isn't resolvable, seed it: a bot may message
+    a user that has started it using access_hash 0. Best-effort - never raises."""
+    try:
+        await client.resolve_peer(chat_id)
+        return                                   # already cached
+    except Exception:
+        pass
+    try:
+        if chat_id > 0:                          # user: bot can DM a starter with access_hash 0
+            await client.storage.update_peers([(chat_id, 0, "user", None, None)])
+        else:                                    # channel/group: fetching caches its access_hash
+            await client.get_chat(chat_id)
+    except Exception as e:
+        print(f"uploader: could not seed peer {chat_id} ({type(e).__name__}): {e}")
+
+
 async def send(chat_id: int, path: str, caption: str, cover: str | None = None,
                progress=None, force_kind: str | None = None, lang: str = "en") -> None:
     """Send the downloaded file with the right method + caption (+ cover for music).
@@ -161,6 +180,7 @@ async def send(chat_id: int, path: str, caption: str, cover: str | None = None,
         client = _premium
     else:
         client = _app
+    await _ensure_peer(client, chat_id)   # avoid PEER_ID_INVALID on an unmet peer (fresh session)
     kind = metadata.media_kind(path)
     if force_kind == "file":          # user chose to receive it as a document
         kind = "document"
