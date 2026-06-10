@@ -146,22 +146,25 @@ def _make_video_thumb(path: str, duration: int = 0) -> str | None:
 
 
 async def _ensure_peer(client, chat_id: int) -> None:
-    """The bot uploader runs with no_updates=True, so it never caches peers from updates;
-    a user/chat it hasn't met this session then fails with PEER_ID_INVALID (e.g. right after
-    a restart with a fresh session). If the peer isn't resolvable, seed it: a bot may message
-    a user that has started it using access_hash 0. Best-effort - never raises."""
+    """The bot uploader runs with no_updates=True, so it never caches peers from updates; a
+    user/chat it hasn't met this session then fails with PEER_ID_INVALID (e.g. right after a
+    restart with a fresh session). Resolve it: seeding a user with access_hash 0 is NOT enough -
+    Telegram rejects SendMedia with a 0 hash. So seed 0, then read the peer (get_users /
+    get_chat), which makes Telegram return the real access_hash (answered for a bot messaging a
+    user that has started it) and caches it. Best-effort - never raises."""
     try:
         await client.resolve_peer(chat_id)
         return                                   # already cached
     except Exception:
         pass
     try:
-        if chat_id > 0:                          # user: bot can DM a starter with access_hash 0
+        if chat_id > 0:                          # user: seed hash 0, then upgrade to the real hash
             await client.storage.update_peers([(chat_id, 0, "user", None, None)])
+            await client.get_users(chat_id)      # users.getUsers caches the REAL access_hash
         else:                                    # channel/group: fetching caches its access_hash
             await client.get_chat(chat_id)
     except Exception as e:
-        print(f"uploader: could not seed peer {chat_id} ({type(e).__name__}): {e}")
+        print(f"uploader: could not resolve peer {chat_id} ({type(e).__name__}): {e}")
 
 
 async def send(chat_id: int, path: str, caption: str, cover: str | None = None,
