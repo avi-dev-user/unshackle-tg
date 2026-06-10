@@ -69,10 +69,13 @@ class Engine:
         data = await self._request("POST", "/list-titles", body)
         return data.get("titles", []) if isinstance(data, dict) else (data or [])
 
-    async def search(self, service: str, query: str, profile: str = None) -> list[dict]:
+    async def search(self, service: str, query: str, profile: str = None,
+                     credential: str = None) -> list[dict]:
         body = {"service": service, "query": query}
         if profile:
             body["profile"] = profile
+        if credential:
+            body["credential"] = credential
         data = await self._request("POST", "/search", body)
         return data.get("results", []) if isinstance(data, dict) else (data or [])
 
