@@ -180,7 +180,8 @@ async def show_titles(chat: int, uid: int, title_id: str):
     if svc_needs_auth(service) and not auth.list_accounts(uid, service):
         return await account_service(chat, uid, mid, service)
     try:
-        titles = await engine.list_titles(service, title_id, profile=str(uid))
+        titles = await engine.list_titles(service, title_id, profile=str(uid),
+                                          credential=auth.first_credential(uid, service))
     except UnshackleError as e:
         return await user_error(chat, mid, uid, e)
     if not titles:
@@ -263,7 +264,8 @@ async def show_tracks(chat: int, uid: int, mid: int, wanted):
         s["source_media"] = cur["id"]
     await edit(chat, mid, tr("CHECKING_TRACKS", lang))
     try:
-        tracks = await engine.list_tracks(s["service"], s["title_id"], wanted=wanted, profile=str(uid))
+        tracks = await engine.list_tracks(s["service"], s["title_id"], wanted=wanted, profile=str(uid),
+                                          credential=auth.first_credential(uid, s["service"]))
     except UnshackleError as e:
         return await user_error(chat, mid, uid, e)
     videos = tracks.get("video", []) if isinstance(tracks, dict) else []

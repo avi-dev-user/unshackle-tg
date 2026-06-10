@@ -138,6 +138,16 @@ def get_credential(tg_id: int, service: str, profile: str) -> str | None:
     return None
 
 
+def first_credential(tg_id: int, service: str) -> str | None:
+    """The user's 'user:pass' from their first credentials-account for a service, for read
+    calls (search / list-titles / list-tracks) that run before a specific account is picked.
+    None if the user has no credentials-account (cookie-only or unauthenticated services)."""
+    for a in list_accounts(tg_id, service):
+        if a.get("kind") == "creds" and a.get("enc"):
+            return _fernet().decrypt(a["enc"].encode()).decode()
+    return None
+
+
 def list_wvd(tg_id: int) -> list[dict]:
     """A user's CDM (.wvd) devices: [{label, profile(=device name), kind, device}]."""
     return _load().get(str(tg_id), {}).get("_CDM", [])

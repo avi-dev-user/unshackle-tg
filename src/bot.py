@@ -616,7 +616,8 @@ async def on_message(msg: dict):
         m = await send(chat, tr("SEARCHING_ON", lang).format(q=html.escape(text), svc=svc))
         mid = m["result"]["message_id"]
         try:
-            results = await engine.search(svc, text, profile=str(uid))
+            results = await engine.search(svc, text, profile=str(uid),
+                                          credential=auth.first_credential(uid, svc))
         except Exception as e:
             return await edit(chat, mid, tr("SEARCH_FAILED", lang).format(err=html.escape(str(e))), [[(tr("BACK", lang), back)]])
         s["search_results"] = results
