@@ -120,12 +120,35 @@ def _read_tags(src: str) -> dict:
     return tags
 
 
+def _human_size(num_bytes: int) -> str:
+    """Human file size: GiB once >= 1 GiB (e.g. '1.31 GiB'), else MB."""
+    gib = num_bytes / 1024 / 1024 / 1024
+    if gib >= 1:
+        return f"{gib:.2f} GiB"
+    return f"{round(num_bytes / 1024 / 1024)} MB"
+
+
+def _stream_langs(info: dict, codec_type: str) -> list:
+    """Distinct language labels of the file's audio/subtitle streams (from ffprobe tags)."""
+    langs = []
+    for st in info.get("streams", []):
+        if st.get("codec_type") == codec_type:
+            la = (st.get("tags") or {}).get("language") or ""
+            la = la.strip()
+            if la and la.lower() not in ("und", "") and la not in langs:
+                langs.append(la)
+    return langs
+
+
 def build_caption(path: str, service_name: str = "", source_url: str = "", media_url: str = "",
-                  lang: str = "en") -> str:
+                  lang: str = "en", display_title: str = "", description: str = "",
+                  upload_date: str = "") -> str:
     """Return an HTML caption (music / video template), localized to `lang`.
-    media_url (the direct source file) is used to ENRICH music tags that the
-    .mka remux dropped (artist/album/genre/composer) - ffprobe reads them from
-    the source without a full download."""
+    display_title / description / upload_date come from the service's title metadata (when
+    available); everything in the expandable block (duration, size, dimensions, quality, audio
+    /subtitle langs) is read from the downloaded file by ffprobe, so it is always accurate.
+    media_url (the direct source file) is used to ENRICH music tags that the .mka remux dropped
+    (artist/album/genre/composer) - ffprobe reads them from the source without a full download."""
     info = _ffprobe(path)
     fmt = info.get("format", {})
     tags = _read_tags(path)
@@ -166,20 +189,37 @@ def build_caption(path: str, service_name: str = "", source_url: str = "", media
         return "\n".join(lines)
 
     # ---- video ----
-    title = _expand_se(_tag(tags, "title") or os.path.splitext(os.path.basename(path))[0], lang)
-    date = _tag(tags, "creation_time", "date")
+    title = _expand_se(display_title or _tag(tags, "title") or os.path.splitext(os.path.basename(path))[0], lang)
     w = h = 0
     for st in info.get("streams", []):
-        if st.get("codec_type") == "video":
+        if _is_real_video(st):                       # ignore embedded cover art
             w, h = st.get("width") or 0, st.get("height") or 0
             break
     quality = f"{h}p" if h else "?"
-    lines = [f"🎬 <b>{title}</b>"]
-    if date:
-        lines.append(f"📅 <code>{date}</code>")
-    lines.append(f"⏱️ <b>{tr('CAP_DURATION', lang)}:</b> {dur}")
-    lines.append(f"🎥 <b>{tr('CAP_QUALITY', lang)}:</b> {quality} ({w}x{h})")
-    lines.append(f"📦 <b>{tr('CAP_SIZE', lang)}:</b> {round(size / 1024 / 1024)}MB")
+    mode = tr("CAP_LANDSCAPE", lang) if w >= h else tr("CAP_PORTRAIT", lang)
+    audio_langs = _stream_langs(info, "audio")
+    sub_langs = _stream_langs(info, "subtitle")
+
+    lines = [f"<b>🎬 {title}</b>"]
+    if description:
+        lines.append(f"\n<b>{description}</b>")
+    if upload_date:
+        lines.append(f"\n<b>{tr('CAP_UPLOAD_DATE', lang)}: </b><code>{upload_date}</code>")
     if source_url:
-        lines.append(f"\n🔗 {src}")
+        lines.append(f"🔗 <a href=\"{source_url}\"><b>{tr('CAP_ORIGINAL_POST', lang)}</b></a>")
+
+    # expandable block - all values read from the file (always accurate)
+    block = [
+        f"<b>{tr('CAP_DURATION', lang)}: </b><code>{dur}</code>, "
+        f"<b>{tr('CAP_SIZE', lang)}: </b><code>{_human_size(size)}</code>",
+        f"<b>{tr('CAP_QUALITY', lang)}: </b><code>{quality}</code>, "
+        f"<b>{tr('CAP_DIMENSION', lang)}: </b><code>{w}x{h}</code>, "
+        f"<b>{tr('CAP_MODE', lang)}: </b><code>{mode}</code>",
+    ]
+    if audio_langs:
+        line = f"🔊 <b>{tr('CAP_AUDIO', lang)}: </b><code>{', '.join(audio_langs)}</code>"
+        if sub_langs:
+            line += f"  📝 <b>{tr('CAP_SUBTITLES_CAP', lang)}: </b><code>{', '.join(sub_langs)}</code>"
+        block.append(line)
+    lines.append("\n<blockquote expandable>" + "\n".join(block) + "</blockquote>")
     return "\n".join(lines)
