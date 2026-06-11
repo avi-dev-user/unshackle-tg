@@ -147,6 +147,36 @@ def _make_video_thumb(path: str, duration: int = 0) -> str | None:
     return None
 
 
+async def _download_thumb(url: str) -> str | None:
+    """Download a poster URL and shrink it to a Telegram-valid thumbnail (JPEG, <=320px wide).
+    Returns a temp path the caller must delete, or None on any failure (caller falls back)."""
+    import tempfile
+
+    fd, raw = tempfile.mkstemp(prefix="poster_raw_", dir=config.STATE_DIR)
+    os.close(fd)
+    fd, out = tempfile.mkstemp(prefix="poster_", suffix=".jpg", dir=config.STATE_DIR)
+    os.close(fd)
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as s:
+            async with s.get(url) as r:
+                if r.status != 200:
+                    raise RuntimeError(f"poster HTTP {r.status}")
+                with open(raw, "wb") as f:
+                    f.write(await r.read())
+        rr = subprocess.run(["ffmpeg", "-y", "-i", raw, "-vf", "scale=320:-2", "-q:v", "5", out],
+                            capture_output=True, timeout=60)
+        if rr.returncode == 0 and os.path.exists(out) and os.path.getsize(out) > 0:
+            return out
+    except Exception:
+        pass
+    finally:
+        if os.path.exists(raw):
+            os.remove(raw)
+    if os.path.exists(out):
+        os.remove(out)
+    return None
+
+
 async def _ensure_peer(client, chat_id: int) -> None:
     """Make `chat_id` resolvable for SendMedia. The uploader is a no_updates bot, so it never
     learns peers from updates, and a user seeded with access_hash 0 still 400s on SendMedia
@@ -365,7 +395,8 @@ async def _pyro_send(client, chat_id: int, path: str, caption: str, cover: str |
 async def deliver(chat_id: int, path: str, service: str = "", source_url: str = "",
                   media_url: str = "", progress=None, force_kind: str | None = None,
                   cover_path: str | None = None, lang: str = "en",
-                  display_title: str = "", description: str = "", upload_date: str = "") -> None:
+                  display_title: str = "", description: str = "", upload_date: str = "",
+                  cover_url: str = "") -> None:
     """Build caption + cover, send, then delete the local file (and empty parent dir).
     media_url = the direct source file (e.g. the episode's mp3) → enriches music
     tags/cover that the .mka remux dropped. progress = real-time upload callback."""
@@ -384,6 +415,10 @@ async def deliver(chat_id: int, path: str, service: str = "", source_url: str = 
             metadata.extract_cover(media_url, cov) if media_url else None)
         if not cover and os.path.exists(cov):
             os.remove(cov)                     # no cover extracted -> drop the empty temp file
+    # a service-provided poster (e.g. MAKO's seo.image) -> use as the video thumbnail when the
+    # user set no custom cover. downloaded + shrunk to Telegram's thumbnail limits (<=320px jpg).
+    if cover is None and cover_url:
+        cover = await _download_thumb(cover_url)
     # if the file is over the biggest client's cap, split it into sendable parts
     max_limit = PREMIUM_LIMIT if _premium is not None else BOT_LIMIT
     size = os.path.getsize(path) if os.path.exists(path) else 0

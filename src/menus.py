@@ -279,6 +279,7 @@ async def show_tracks(chat: int, uid: int, mid: int, wanted):
     s["name"] = _t.get("name", "")
     s["description"] = _t.get("description") or ""   # synopsis + air date for the rich caption
     s["upload_date"] = _t.get("date") or ""
+    s["cover_url"] = _t.get("cover_url") or ""        # service poster -> used as thumbnail if no custom cover
     # rich context line shown on every downstream wizard screen
     se_m = re.match(r"S(\d+)(?:E(\d+))?$", str(wanted)) if wanted else None
     series = (titles[0].get("series_title") if titles else "") or ""
