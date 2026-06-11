@@ -123,7 +123,8 @@ async def start_download(chat: int, uid: int, mid: int, profile: str):
                           name=s.get("name") or s.get("service", ""), send_as=s.get("send_as"),
                           cover=s.get("cover"), src_url=s.get("title_id"),
                           source_media=s.get("source_media", ""),
-                          description=s.get("description", ""), upload_date=s.get("upload_date", ""))
+                          description=s.get("description", ""), upload_date=s.get("upload_date", ""),
+                          cover_url=s.get("cover_url", ""))
 
 
 async def download_file(file_id: str, dest: str) -> None:
@@ -142,7 +143,7 @@ _resv_seq = 0   # monotonic id for synchronous concurrency-slot reservations
 async def launch_download(chat: int, uid: int, mid: int, *, service, title_id, profile, wanted,
                           quality, flags, name, src_url=None, source_media="", retried=False,
                           send_as=None, cover=None, is_monitor=False, gate=True,
-                          description="", upload_date=""):
+                          description="", upload_date="", cover_url=""):
     """Submit a download to the engine and start polling it. The single submit seam shared by
     the wizard and the auto-monitor: validates the profile, atomically reserves a concurrency
     slot (gate=True), and carries a dl_spec for the geofence proxy retry (which passes gate=False
@@ -175,7 +176,7 @@ async def launch_download(chat: int, uid: int, mid: int, *, service, title_id, p
         spec = {"service": service, "title_id": title_id, "profile": profile, "wanted": wanted,
                 "quality": quality, "flags": flags, "name": name, "retried": retried,
                 "send_as": send_as, "cover": cover, "is_monitor": is_monitor,
-                "description": description, "upload_date": upload_date}
+                "description": description, "upload_date": upload_date, "cover_url": cover_url}
         asyncio.create_task(poll_job(chat, uid, mid, job_id, outdir, src_url=src_url,
                                      source_media=source_media, dl_spec=spec, is_monitor=is_monitor))
     finally:
@@ -295,7 +296,8 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                                            cover_path=(dl_spec or {}).get("cover"), lang=lang,
                                            display_title=(dl_spec or {}).get("name") or "",
                                            description=(dl_spec or {}).get("description") or "",
-                                           upload_date=(dl_spec or {}).get("upload_date") or "")
+                                           upload_date=(dl_spec or {}).get("upload_date") or "",
+                                           cover_url=(dl_spec or {}).get("cover_url") or "")
                 except Exception as e:
                     shutil.rmtree(outdir, ignore_errors=True)
                     await user_error(chat, mid, uid, f"upload failed ({os.path.basename(path)}): {e}")
