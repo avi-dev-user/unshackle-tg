@@ -61,6 +61,18 @@ async def start() -> bool:
             await p.start()
             _premium = p
             print("premium uploader: on (≤4GB)")
+            # Boot health-check: surface a broken >2GB relay now, not when a big file arrives.
+            try:
+                me = await p.get_me()
+                if not getattr(me, "is_premium", False):
+                    print("premium uploader WARNING: account is not Premium - >2GB uploads will fail")
+                if config.DUMP_CHANNEL:
+                    await p.get_chat(config.DUMP_CHANNEL)
+                    print("premium relay: dump channel reachable")
+                else:
+                    print("premium relay WARNING: DUMP_CHANNEL unset - >2GB relay disabled")
+            except Exception as e:
+                print(f"premium relay WARNING: dump channel unreachable ({type(e).__name__}): {e}")
         except Exception as e:
             print(f"premium uploader off ({type(e).__name__}): {e}")
             _premium = None

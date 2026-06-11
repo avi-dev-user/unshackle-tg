@@ -22,8 +22,8 @@ jobs:
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: avi-dev-user
-          password: ${{ secrets.GHCR_TOKEN }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Tags
         id: tags
         run: |
@@ -40,7 +40,14 @@ jobs:
       - name: Trigger downstream unshackle-bot rebuild
         # The unshackle-bot Dockerfile FROMs ghcr.io/avi-dev-user/unshackle-tg:latest.
         # When this base changes, the overlay must rebuild on the new base.
+        # GITHUB_TOKEN is repo-scoped and cannot dispatch another repo's workflow, so this
+        # cross-repo trigger needs a PAT (workflow scope). Optional: if unset, the overlay
+        # simply won't auto-rebuild - run its build manually or set DOWNSTREAM_TOKEN.
         env:
-          GH_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          GH_TOKEN: ${{ secrets.DOWNSTREAM_TOKEN }}
         run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::DOWNSTREAM_TOKEN unset - skipping unshackle-bot auto-rebuild; trigger it manually."
+            exit 0
+          fi
           gh workflow run build.yml -R avi-dev-user/unshackle-bot --ref main || true
