@@ -270,8 +270,19 @@ async def show_tracks(chat: int, uid: int, mid: int, wanted):
         return await user_error(chat, mid, uid, e)
     videos = tracks.get("video", []) if isinstance(tracks, dict) else []
     s["heights"] = sorted({v["height"] for v in videos if v.get("height")}, reverse=True)
+    # per resolution: the richest variant (highest bitrate) - codec / dynamic-range / bitrate for the
+    # quality picker, so the choice isn't blind. All real values straight from the engine.
+    vinfo = {}
+    for v in sorted(videos, key=lambda v: v.get("bitrate") or 0):
+        if v.get("height"):
+            vinfo[v["height"]] = {"codec": v.get("codec_display") or v.get("codec") or "",
+                                  "range": v.get("range_display") or v.get("range") or "",
+                                  "bitrate": v.get("bitrate")}
+    s["vinfo"] = vinfo
+    audios = tracks.get("audio", []) if isinstance(tracks, dict) else []
     s["nv"] = len(videos)
-    s["na"] = len(tracks.get("audio", []) if isinstance(tracks, dict) else [])
+    s["na"] = len(audios)
+    s["audio_langs"] = sorted({a.get("language") for a in audios if a.get("language")})
     subs = tracks.get("subtitles", []) if isinstance(tracks, dict) else []
     s["ns"] = len(subs)
     s["sub_langs"] = sorted({x.get("language") for x in subs if x.get("language")})
@@ -322,7 +333,15 @@ async def show_track_types(chat: int, uid: int, mid: int):
             rows.append([(("☑️ " if k in sel else "⬜ ") + label, f"tt_tog:{k}")])
     rows.append([(tr("CONTINUE", lang), "tt_go")])
     rows.append([(tr("MENU", lang), "m:main")])
-    info = f"🎬 {s['nv']} · 🎧 {s['na']} · 💬 {s['ns']}"
+
+    def _count(emoji: str, n: int, langs: list) -> str:   # "🎧 2 (Hebrew, English)" when languages known
+        label = f"{emoji} {n}"
+        if langs:
+            label += " (" + ", ".join(_lang_label(la, lang) for la in langs) + ")"
+        return label
+    info = " · ".join((f"🎬 {s['nv']}",
+                       _count("🎧", s["na"], s.get("audio_langs") or []),
+                       _count("💬", s["ns"], s.get("sub_langs") or [])))
     await edit(chat, mid, f"{_wiz_head(s, lang)}\n{info}\n\n" + tr("MARK_WHAT_TO_DOWNLOAD", lang), rows)
 
 
@@ -333,7 +352,24 @@ async def show_quality(chat: int, uid: int, mid: int):
     if not heights:                       # no resolutions → skip quality
         s["quality"] = "best"
         return await show_send_as(chat, uid, mid)
-    rows = grid_rows([(f"{h}p", f"q:{h}") for h in heights], 3)   # resolutions several per row
+    vinfo = s.get("vinfo") or {}
+
+    def qlabel(h: int) -> str:            # "1080p · HDR10 · H.265 · 8.5M" - real values, no faked size
+        vi = vinfo.get(h) or {}
+        parts = [f"{h}p"]
+        rng = vi.get("range") or ""
+        if rng and rng.upper() != "SDR":
+            parts.append(rng)
+        if vi.get("codec"):
+            parts.append(vi["codec"])
+        if vi.get("bitrate"):
+            parts.append(f"{vi['bitrate'] / 1000:.1f}M")
+        return " · ".join(parts)
+
+    if vinfo:                             # one per row - the enriched labels need the width
+        rows = [[(qlabel(h), f"q:{h}")] for h in heights]
+    else:
+        rows = grid_rows([(f"{h}p", f"q:{h}") for h in heights], 3)
     rows.append([(tr("BEST", lang), "q:best")])
     rows.append([(tr("BACK", lang), "tt:back")])
     await edit(chat, mid, f"{_wiz_head(s, lang)}\n" + tr("PICK_QUALITY", lang), rows)

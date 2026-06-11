@@ -128,6 +128,46 @@ def _human_size(num_bytes: int) -> str:
     return f"{round(num_bytes / 1024 / 1024)} MB"
 
 
+_VCODEC = {"h264": "H.264", "avc1": "H.264", "hevc": "H.265", "h265": "H.265",
+           "av1": "AV1", "vp9": "VP9", "vp09": "VP9", "mpeg2video": "MPEG-2"}
+_ACODEC = {"aac": "AAC", "eac3": "EAC3", "ac3": "AC3", "opus": "Opus", "mp3": "MP3",
+           "flac": "FLAC", "vorbis": "Vorbis", "dts": "DTS", "truehd": "TrueHD"}
+
+
+def _codec_label(name: str, table: dict) -> str:
+    n = (name or "").lower()
+    return table.get(n, name.upper() if name else "")
+
+
+def _channels_label(n) -> str:
+    return {1: "Mono", 2: "Stereo", 6: "5.1", 7: "6.1", 8: "7.1"}.get(int(n or 0), f"{int(n)}ch" if n else "")
+
+
+def _fps_label(st: dict) -> str:
+    """Frame rate from ffprobe's 'num/den' string, rounded to a friendly value (24/25/30/50/60)."""
+    for key in ("avg_frame_rate", "r_frame_rate"):
+        val = st.get(key) or ""
+        if "/" in val:
+            num, den = val.split("/", 1)
+            try:
+                f = float(num) / float(den) if float(den) else 0
+            except (ValueError, ZeroDivisionError):
+                f = 0
+            if f > 0:
+                return f"{f:.3f}".rstrip("0").rstrip(".") if abs(f - round(f)) > 0.05 else str(round(f))
+    return ""
+
+
+def _hdr_label(st: dict) -> str:
+    """Dynamic range from the video stream's colour transfer (only flag HDR, SDR is the norm)."""
+    tr_ = (st.get("color_transfer") or "").lower()
+    if tr_ == "smpte2084":
+        return "HDR10"
+    if tr_ == "arib-std-b67":
+        return "HLG"
+    return ""
+
+
 def _stream_langs(info: dict, codec_type: str) -> list:
     """Distinct language labels of the file's audio/subtitle streams (from ffprobe tags)."""
     langs = []
@@ -191,11 +231,23 @@ def build_caption(path: str, service_name: str = "", source_url: str = "", media
     # ---- video ----
     title = _expand_se(display_title or _tag(tags, "title") or os.path.splitext(os.path.basename(path))[0], lang)
     w = h = 0
+    vcodec = hdr = fps = ""
     for st in info.get("streams", []):
         if _is_real_video(st):                       # ignore embedded cover art
             w, h = st.get("width") or 0, st.get("height") or 0
+            vcodec = _codec_label(st.get("codec_name"), _VCODEC)
+            hdr = _hdr_label(st)
+            fps = _fps_label(st)
             break
-    quality = f"{h}p" if h else "?"
+    # main audio stream → codec + channel layout (e.g. "EAC3 5.1")
+    acodec = ""
+    for st in info.get("streams", []):
+        if st.get("codec_type") == "audio":
+            acodec = " ".join(p for p in (_codec_label(st.get("codec_name"), _ACODEC),
+                                          _channels_label(st.get("channels"))) if p)
+            break
+    quality = " · ".join(p for p in (f"{h}p" if h else "?", hdr, vcodec,
+                                     (f"{fps}fps" if fps else "")) if p)
     mode = tr("CAP_LANDSCAPE", lang) if w >= h else tr("CAP_PORTRAIT", lang)
     audio_langs = _stream_langs(info, "audio")
     sub_langs = _stream_langs(info, "subtitle")
@@ -216,8 +268,9 @@ def build_caption(path: str, service_name: str = "", source_url: str = "", media
         f"<b>{tr('CAP_DIMENSION', lang)}: </b><code>{w}x{h}</code>, "
         f"<b>{tr('CAP_MODE', lang)}: </b><code>{mode}</code>",
     ]
-    if audio_langs:
-        line = f"🔊 <b>{tr('CAP_AUDIO', lang)}: </b><code>{', '.join(audio_langs)}</code>"
+    audio_bits = [b for b in (acodec, ", ".join(audio_langs)) if b]   # "EAC3 5.1 · Hebrew, English"
+    if audio_bits:
+        line = f"🔊 <b>{tr('CAP_AUDIO', lang)}: </b><code>{' · '.join(audio_bits)}</code>"
         if sub_langs:
             line += f"  📝 <b>{tr('CAP_SUBTITLES_CAP', lang)}: </b><code>{', '.join(sub_langs)}</code>"
         block.append(line)
