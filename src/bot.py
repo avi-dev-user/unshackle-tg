@@ -271,6 +271,10 @@ async def on_callback(cq: dict):
         return await recordings.menu(chat, uid, mid)
     if data.startswith("rec:") and users.is_admin(uid):
         rest = data.split(":", 1)[1]
+        if rest == "stop":                           # end a running recording early (keep partial)
+            recordings.stop(uid)
+            return await call("answerCallbackQuery", callback_query_id=cq["id"],
+                              text=tr("REC_STOPPING", lang))
         if rest == "add":
             sess(uid).update(step="await_rec_name", rec_new={})
             return await edit(chat, mid, tr("REC_ADD_NAME", lang), [[(tr("REC_BACK", lang), "m:rec")]])
