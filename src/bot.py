@@ -17,7 +17,7 @@ import time
 
 import aiohttp
 
-from . import admin, auth, config, monitors, state, uploader, users
+from . import admin, auth, config, monitors, recordings, state, uploader, users
 from .catalog_meta import detect_service, load_cat_overrides, set_cat_override, svc_needs_auth, unwrap_url
 from .download import download_file, launch_download, redraw_progress, retry_spec, start_download, to_sel
 from .errors import report_error
@@ -266,6 +266,32 @@ async def on_callback(cq: dict):
         return await services_grid(chat, uid, mid, "il", 0)
     if data == "m:svc" and users.is_admin(uid):
         return await services_grid(chat, uid, mid, "il", 0)
+    # --- live recording (admin only) ---
+    if data == "m:rec" and users.is_admin(uid):
+        return await recordings.menu(chat, uid, mid)
+    if data.startswith("rec:") and users.is_admin(uid):
+        rest = data.split(":", 1)[1]
+        if rest == "add":
+            sess(uid).update(step="await_rec_name", rec_new={})
+            return await edit(chat, mid, tr("REC_ADD_NAME", lang), [[(tr("REC_BACK", lang), "m:rec")]])
+        if rest.startswith("ch:"):
+            return await recordings.channel(chat, uid, mid, rest[3:])
+        if rest.startswith("go:"):
+            return await recordings.ask_duration(chat, uid, mid, rest[3:])
+        if rest.startswith("del:"):
+            name = rest[4:]
+            recordings.delete(name)
+            await call("answerCallbackQuery", callback_query_id=cq["id"],
+                       text=tr("REC_DELETED", lang).format(name=name))
+            return await recordings.menu(chat, uid, mid)
+        if rest.startswith("edit:"):                 # reuse the add wizard, pre-seeding the name
+            name = rest[5:]
+            sess(uid).update(step="await_rec_url", rec_new={"name": name})
+            return await edit(chat, mid, tr("REC_ADD_URL", lang), [[(tr("REC_BACK", lang), "m:rec")]])
+        if rest.startswith("dur:"):
+            _, name, secs = rest.split(":", 2)
+            recordings.start(chat, uid, mid, name, int(secs))
+            return
     if data.startswith("svcg:") and users.is_admin(uid):
         _, cat, page = data.split(":")
         return await services_grid(chat, uid, mid, cat, int(page))
@@ -435,6 +461,29 @@ async def on_message(msg: dict):
             return await admin.user_detail(chat, uid, m["result"]["message_id"], users.key(u))
         except ValueError as e:
             return await send(chat, f"🔴 {html.escape(str(e))}")
+
+    # live-recording: add/edit channel wizard (admin only): name -> url -> key
+    if s.get("step") in ("await_rec_name", "await_rec_url", "await_rec_key") and users.is_admin(uid):
+        text = (msg.get("text") or "").strip()
+        if not text:
+            return
+        new = s.setdefault("rec_new", {})
+        if s["step"] == "await_rec_name":
+            new["name"] = text
+            s["step"] = "await_rec_url"
+            return await send(chat, tr("REC_ADD_URL", lang))
+        if s["step"] == "await_rec_url":
+            new["url"] = text
+            s["step"] = "await_rec_key"
+            return await send(chat, tr("REC_ADD_KEY", lang))
+        # await_rec_key
+        key = "" if text == "-" else text
+        recordings.put(new["name"], new["url"], key)
+        s["step"] = None
+        s.pop("rec_new", None)
+        await send(chat, tr("REC_SAVED", lang).format(name=html.escape(new["name"])))
+        m = await send(chat, "⏳...")
+        return await recordings.menu(chat, uid, m["result"]["message_id"])
 
     # cookies upload
     if "document" in msg and s.get("step") in ("await_cookies", "await_wvd"):
