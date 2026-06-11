@@ -18,30 +18,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: docker/setup-buildx-action@v3
-
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          # Use the org-wide PAT (avi-dev-user) — GITHUB_TOKEN doesn't have
-          # write access to packages that were originally pushed by another
-          # client (in our case the avi1 build-webhook using the same PAT).
           username: avi-dev-user
           password: ${{ secrets.GHCR_TOKEN }}
-
-      - name: Compute image tags + ArgoCD app name
+      - name: Tags
         id: tags
         run: |
           SHORT=$(echo "${{ github.sha }}" | cut -c1-7)
-          # Docker tags must be lowercase. ArgoCD apps in our cluster also use
-          # lowercase names with '_' normalized to '-' (matches the
-          # build-webhook REPO_MAP convention we're replacing).
-          REPO_LC=$(echo "${{ github.event.repository.name }}" | tr '[:upper:]_' '[:lower:]-')
-          IMG=ghcr.io/${{ github.repository_owner }}/$REPO_LC
+          IMG=ghcr.io/${{ github.repository_owner }}/unshackle-tg
           echo "tags=${IMG}:latest,${IMG}:${SHORT}" >> "$GITHUB_OUTPUT"
-          echo "argocd_app=$REPO_LC" >> "$GITHUB_OUTPUT"
-
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -49,19 +37,10 @@ jobs:
           tags: ${{ steps.tags.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      - name: Trigger ArgoCD sync on avi1
-        # Forces ArgoCD to reconcile right now (without this we wait up to
-        # 3 min for the next polling cycle). ImageUpdater scans during the
-        # reconcile, sees the new :latest digest, writes back, syncs → pod
-        # rolls. End-to-end push→running ≈ 30-60s instead of 3-5 min.
+      - name: Trigger downstream unshackle-bot rebuild
+        # The unshackle-bot Dockerfile FROMs ghcr.io/avi-dev-user/unshackle-tg:latest.
+        # When this base changes, the overlay must rebuild on the new base.
         env:
-          AVI1_SSH_KEY: ${{ secrets.AVI1_SSH_KEY }}
-          AVI1_HOST: ${{ secrets.AVI1_HOST }}
-          AVI1_PORT: ${{ secrets.AVI1_PORT }}
+          GH_TOKEN: ${{ secrets.GHCR_TOKEN }}
         run: |
-          mkdir -p ~/.ssh
-          echo "$AVI1_SSH_KEY" > ~/.ssh/avi1 && chmod 600 ~/.ssh/avi1
-          ssh-keyscan -p "$AVI1_PORT" -H "$AVI1_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-          ssh -i ~/.ssh/avi1 -p "$AVI1_PORT" root@"$AVI1_HOST" \
-            "kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml -n argocd patch application.argoproj.io/${{ steps.tags.outputs.argocd_app }} --type merge -p '{\"operation\":{\"sync\":{}}}'" || true
+          gh workflow run build.yml -R avi-dev-user/unshackle-bot --ref main || true
