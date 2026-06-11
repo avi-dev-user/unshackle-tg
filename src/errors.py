@@ -41,8 +41,11 @@ def _admin_actor(uid) -> str:
     return f"👤 {who or '?'} <code>{uid}</code> {links}"
 
 
-async def user_error(chat: int, mid: int, uid, e, back=None) -> None:
-    """User sees a friendly message; the admin gets the full technical detail + who."""
+async def user_error(chat: int, mid: int, uid, e, back=None, allow_retry: bool = False) -> None:
+    """User sees a friendly message; the admin gets the full technical detail + who.
+    allow_retry: offer a one-tap 🔁 retry when the failure looks transient (rate-limit, network,
+    timeout, or generic) - i.e. cases where re-running the same request might just work. Errors
+    with a more specific remedy (login/CDM/geo/premium) get that action instead, not a retry."""
     lang = users.lang(uid)
     msg = str(e)
     for admin in config.ADMIN_IDS:
@@ -63,6 +66,13 @@ async def user_error(chat: int, mid: int, uid, e, back=None) -> None:
         rows.append([(tr("ADD_AN_ACCOUNT_FOR", lang).format(svc=svc), f"as:{svc}")])
     elif any(k in low for k in ("widevine", "playready", "cdm", "license", "decrypt", " drm")):
         rows.append([(tr("CDM_FILES", lang), "m:cdm")])
+    # transient failure with a saved attempt → re-run it without re-walking the wizard. Skip when the
+    # error is one that retrying identically won't fix (geo-block, login, premium, protected, no content).
+    elif allow_retry and not any(k in low for k in (
+            "available in your", "geo-block", "geoblock", "blocked in your", "premium", "protected",
+            "sign in", "authenticat", "login", "needs auth", "cookies", "widevine", "playready",
+            "cdm", "license", "decrypt", " drm", "no matching", "no content", "no episodes", "not found")):
+        rows.append([(tr("TRY_AGAIN", lang), "retry")])
     rows.append([back])
     await edit(chat, mid, _friendly(msg, lang), rows)
 
