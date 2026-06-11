@@ -59,6 +59,11 @@ FREE_SERVICES = set(_json_env("FREE_SERVICES", []))
 CATCHALL_SERVICE = os.environ.get("CATCHALL_SERVICE", "")
 # service tag that handles podcast/RSS feed URLs; "" = none
 FEED_SERVICE = os.environ.get("FEED_SERVICE", "")
+# services whose media SEGMENTS are themselves geo-locked (not just the manifest/API), so the
+# bulk download must also go through the region proxy. By default segments download directly
+# (faster); list a tag here only when direct segment fetches get geo-blocked (e.g. MAKO's
+# CloudFront 900p renditions are IL-locked, while its AKAMAI ones are not).
+SEGMENT_PROXY_SERVICES = set(_json_env("SEGMENT_PROXY_SERVICES", []))
 
 # --- Monitors ---
 # IANA timezone for fixed-time monitor schedules (e.g. "Asia/Jerusalem"). Default UTC.
