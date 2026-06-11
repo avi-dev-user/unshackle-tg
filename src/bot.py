@@ -651,12 +651,26 @@ async def on_message(msg: dict):
 # --------------------------------------------------------------------------
 # Long-poll loop
 # --------------------------------------------------------------------------
+async def _heartbeat_loop():
+    """Write a liveness timestamp every 60s. A watchdog (CronJob) reads it from the data volume
+    and alerts if it goes stale - catching a dead pod OR a wedged event loop (e.g. CPU starvation),
+    which a plain pod-readiness check would miss."""
+    hb = config.STATE_DIR / "heartbeat"
+    while True:
+        try:
+            hb.write_text(str(int(time.time())))
+        except Exception:
+            pass
+        await asyncio.sleep(60)
+
+
 async def run():
     config.ensure_dirs()
     users.load()
     monitors.load()
     load_cat_overrides()
     asyncio.create_task(monitor_loop())            # background auto-monitor scheduler
+    asyncio.create_task(_heartbeat_loop())         # liveness beat for the watchdog CronJob
     me = await call("getMe")
     if not me.get("ok"):
         raise SystemExit(f"Bot login failed: {me}")

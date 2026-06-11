@@ -15,7 +15,45 @@ from .format import _lang_label
 from .i18n import LANGS, tr
 from .session import active_jobs, sess
 from .state import engine
-from .tg import GRID_N, PAGE, edit, grid_rows, send
+from .tg import GRID_N, PAGE, call, edit, grid_rows, send
+
+
+async def _clear_poster(uid: int) -> None:
+    """Remove the standalone poster photo (if one was shown) when the user leaves the title."""
+    s = sess(uid)
+    mid = s.pop("poster_mid", None)
+    s.pop("poster_key", None)
+    if mid and s.get("poster_chat"):
+        try:
+            await call("deleteMessage", chat_id=s["poster_chat"], message_id=mid)
+        except Exception:
+            pass
+
+
+async def _show_poster(chat: int, uid: int) -> bool:
+    """Show the title's poster (cover_url) as a standalone photo with title + synopsis caption.
+    Separate from the single-edited wizard message, so the edit chain is untouched. Sent once per
+    title; returns True if a poster is now displayed (so the wizard text can skip the synopsis)."""
+    s = sess(uid)
+    cover = s.get("cover_url")
+    key = (s.get("title_id"), s.get("wanted"))
+    if not cover:
+        return False
+    if s.get("poster_key") == key:                 # already showing this exact selection
+        return True
+    await _clear_poster(uid)
+    cap = [f"<b>🎬 {html.escape(s.get('name') or '')}</b>"]
+    desc = (s.get("description") or "").strip()
+    if desc:
+        cap.append(html.escape(desc[:900]))
+    r = await call("sendPhoto", chat_id=chat, photo=cover, parse_mode="HTML",
+                   caption="\n\n".join(cap))
+    if isinstance(r, dict) and r.get("ok"):
+        s["poster_mid"] = r["result"]["message_id"]
+        s["poster_chat"] = chat
+        s["poster_key"] = key
+        return True
+    return False
 
 
 # --------------------------------------------------------------------------
@@ -23,6 +61,7 @@ from .tg import GRID_N, PAGE, edit, grid_rows, send
 # --------------------------------------------------------------------------
 async def main_menu(chat: int, uid: int, mid: int = None):
     sess(uid)["subs_mode"] = False                 # leave any subtitle-only flow
+    await _clear_poster(uid)                        # drop the title poster when back at the menu
     lang = users.lang(uid)
     items = [(tr("NEW_DOWNLOAD", lang), "m:dl"), (tr("SEARCH", lang), "m:search"),
              (tr("SUBTITLES", lang), "m:subs"), (tr("MY_DOWNLOADS", lang), "m:dls"),
@@ -173,6 +212,7 @@ async def show_titles(chat: int, uid: int, title_id: str):
     if not can_use(uid, service):
         return await send(chat, tr("YOU_DON_HAVE_PERMISSION_2", lang).format(service=html.escape(service)),
                           [[(tr("MENU", lang), "m:main")]])
+    await _clear_poster(uid)                        # a fresh title: drop any previous poster
     m = await send(chat, tr("LOADING", lang))
     mid = m["result"]["message_id"]
     # creds-required service with no connected account: send the user to connect it rather
@@ -342,7 +382,25 @@ async def show_track_types(chat: int, uid: int, mid: int):
     info = " · ".join((f"🎬 {s['nv']}",
                        _count("🎧", s["na"], s.get("audio_langs") or []),
                        _count("💬", s["ns"], s.get("sub_langs") or [])))
-    await edit(chat, mid, f"{_wiz_head(s, lang)}\n{info}\n\n" + tr("MARK_WHAT_TO_DOWNLOAD", lang), rows)
+    # Poster on top: the first time we reach this screen for a title that has a cover, drop the
+    # text wizard message, post the poster (with synopsis caption), and re-send the controls as a
+    # fresh message below it. On back-navigation (same poster_key) we just edit in place - no flicker.
+    key = (s.get("title_id"), s.get("wanted"))
+    reposition = bool(s.get("cover_url")) and s.get("poster_key") != key
+    syn = ""                                     # synopsis inline only when no poster carries it
+    if not s.get("cover_url") and (s.get("description") or "").strip():
+        syn = "\n" + html.escape(s["description"].strip()[:300])
+    text = f"{_wiz_head(s, lang)}\n{info}{syn}\n\n" + tr("MARK_WHAT_TO_DOWNLOAD", lang)
+    if reposition:
+        try:
+            await call("deleteMessage", chat_id=chat, message_id=mid)
+        except Exception:
+            pass
+        await _show_poster(chat, uid)            # photo above; sets poster_key so we don't repeat
+        m = await send(chat, text, rows)
+        s["mid"] = m["result"]["message_id"]
+    else:
+        await edit(chat, mid, text, rows)
 
 
 async def show_quality(chat: int, uid: int, mid: int):
