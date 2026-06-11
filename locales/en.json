@@ -291,5 +291,9 @@
   "CAP_LANDSCAPE": "Landscape",
   "CAP_PORTRAIT": "Portrait",
   "CAP_AUDIO": "Audio",
-  "CAP_SUBTITLES_CAP": "Subtitles"
+  "CAP_SUBTITLES_CAP": "Subtitles",
+  "TRY_AGAIN": "🔁 Try again",
+  "CONFIRM_CANCEL_Q": "Cancel this download?",
+  "YES_CANCEL": "✖️ Yes, cancel",
+  "NO_CONTINUE": "↩️ Keep going"
 }

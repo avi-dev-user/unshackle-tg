@@ -16,11 +16,16 @@ from . import auth, config, state, uploader, users
 from .catalog_meta import can_use
 from .engine import UnshackleError
 from .errors import report_error, user_error
-from .format import _fmt_eta, _lang_label, _phase, _render_progress
+from .format import _fmt_eta, _fmt_size, _lang_label, _phase, _render_progress
 from .i18n import tr
 from .session import active_jobs, sess
 from .state import engine
 from .tg import FILE_API, call, edit
+
+# uid -> the kwargs of the user's last interactive launch_download, so a transient failure can
+# offer a one-tap "try again" without re-walking the whole wizard. In-memory only (a bot restart
+# clears it, which is fine - the user just re-navigates). Monitors are never stored here.
+retry_spec: dict[int, dict] = {}
 
 
 # --------------------------------------------------------------------------
@@ -152,6 +157,11 @@ async def launch_download(chat: int, uid: int, mid: int, *, service, title_id, p
     # default-deny a forged profile (cookie files are keyed by profile -> another user's cookies)
     if profile not in ({str(uid)} | {a["profile"] for a in auth.list_accounts(uid, service)}):
         profile = str(uid)
+    if not is_monitor:                              # remember this attempt for a one-tap retry on failure
+        retry_spec[uid] = dict(service=service, title_id=title_id, profile=profile, wanted=wanted,
+                               quality=quality, flags=flags, name=name, src_url=src_url,
+                               source_media=source_media, send_as=send_as, cover=cover,
+                               description=description, upload_date=upload_date, cover_url=cover_url)
     jobs = active_jobs.setdefault(uid, {})
     resv = None
     if gate:                                       # atomic check + reserve, no await in between
@@ -168,10 +178,10 @@ async def launch_download(chat: int, uid: int, mid: int, *, service, title_id, p
             resp = await engine.download(service, title_id, profile=profile, wanted=wanted,
                                          quality=quality, output_dir=outdir, **flags)
         except UnshackleError as e:
-            return await user_error(chat, mid, uid, e)
+            return await user_error(chat, mid, uid, e, allow_retry=not is_monitor)
         job_id = (resp.get("job_id") or resp.get("id")) if isinstance(resp, dict) else None
         if not job_id:
-            return await user_error(chat, mid, uid, f"no job_id from API: {resp}")
+            return await user_error(chat, mid, uid, f"no job_id from API: {resp}", allow_retry=not is_monitor)
         jobs[job_id] = {"name": name, "chat": chat}
         started = True                              # the poll task now owns the slot + outdir
         spec = {"service": service, "title_id": title_id, "profile": profile, "wanted": wanted,
@@ -203,9 +213,30 @@ async def poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src_
         shutil.rmtree(outdir, ignore_errors=True)    # never leak the job dir (idempotent)
 
 
+async def redraw_progress(chat: int, uid: int, mid: int, job_id: str) -> None:
+    """Restore the live progress view after the user backs out of the cancel confirmation
+    ('keep going'). Best-effort: the owning poll loop keeps refreshing it on its own cadence."""
+    lang = users.lang(uid)
+    if job_id not in active_jobs.get(uid, {}):       # already finished/cancelled - nothing to resume
+        return await edit(chat, mid, tr("CANCELLED", lang), [[(tr("MENU", lang), "m:main")]])
+    try:
+        j = await engine.job(job_id)
+    except Exception:
+        j = {}
+    name = (active_jobs.get(uid, {}).get(job_id) or {}).get("name") or sess(uid).get("name") \
+        or tr("DOWNLOAD", lang)
+    svc = sess(uid).get("service") or ""
+    head_name = html.escape(str(name))[:48] + (f" · 📺 {html.escape(svc)}" if svc else "")
+    line = _render_progress(head=f"🎬 {head_name}\n⬇️ {_phase(j.get('phase'), lang)}",
+                            pct=int(j.get("progress") or 0), segs_done=j.get("segments_done"),
+                            segs_total=j.get("segments_total"), speed_str=j.get("speed"))
+    await edit(chat, mid, line, [[(tr("CANCEL_3", lang), f"cxl:{job_id}")]])
+
+
 async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src_url=None,
                     source_media="", dl_spec=None, is_monitor=False):
     last = None
+    t_start = time.time()                     # wall-clock, for the "done in M:SS" closing stat
     lang = users.lang(uid)
     tag = ("🤖 " + tr("MONITOR", lang) + " · ") if is_monitor else ""
     name = (active_jobs.get(uid, {}).get(job_id) or {}).get("name") or sess(uid).get("name") \
@@ -232,7 +263,8 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
             fails += 1
             if fails >= 15:                   # engine unreachable ~1min → stop, tell the user
                 shutil.rmtree(outdir, ignore_errors=True)
-                return await user_error(chat, mid, uid, "lost contact with the download engine")
+                return await user_error(chat, mid, uid, "lost contact with the download engine",
+                                        allow_retry=not is_monitor)
             continue
         status = j.get("status")
         prog = int(j.get("progress") or 0)
@@ -261,7 +293,7 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                 except Exception:
                     pass
                 await edit(chat, mid, f"🎬 {head_name}\n⏳ " + tr("SWITCHING_TO_DOWNLOAD_VIA", lang),
-                           [[(tr("CANCEL_3", lang), f"cancel:{job_id}")]])
+                           [[(tr("CANCEL_3", lang), f"cxl:{job_id}")]])
                 return await launch_download(
                     chat, uid, mid, service=dl_spec["service"], title_id=dl_spec["title_id"],
                     profile=dl_spec["profile"], wanted=dl_spec["wanted"], quality=dl_spec["quality"],
@@ -277,7 +309,7 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
             line = f"🎬 {head_name}\n⏳ {status}"
         if line != last:
             last = line
-            await edit(chat, mid, line, [[(tr("CANCEL_3", lang), f"cancel:{job_id}")]])
+            await edit(chat, mid, line, [[(tr("CANCEL_3", lang), f"cxl:{job_id}")]])
         if status == "completed":
             if _cancelled():                         # cancelled after the engine finished, before upload
                 shutil.rmtree(outdir, ignore_errors=True)
@@ -287,6 +319,7 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                 shutil.rmtree(outdir, ignore_errors=True)
                 await edit(chat, mid, "🎉 " + tr("DONE_BUT_NO_FILE", lang), [[(tr("MENU", lang), "m:main")]])
                 return
+            total_bytes = sum(os.path.getsize(f) for f in files if os.path.exists(f))   # before upload/cleanup
             from urllib.parse import urlparse
             src_name = (urlparse(src_url).hostname or "").replace("www.", "") or src_url or "?"
             total = len(files)
@@ -320,7 +353,7 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                 async def on_phase(_head=head):                  # Bot API: localhost buffer done,
                     try:                                         # the real upload to Telegram begins
                         await edit(chat, mid, f"{_head}\n⏳ " + tr("UPLOADING_TO_TELEGRAM", lang),
-                                   [[(tr("CANCEL_3", lang), f"cancel:{job_id}")]])
+                                   [[(tr("CANCEL_3", lang), f"cxl:{job_id}")]])
                     except Exception:
                         pass
 
@@ -335,11 +368,20 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                                            cover_url=(dl_spec or {}).get("cover_url") or "")
                 except Exception as e:
                     shutil.rmtree(outdir, ignore_errors=True)
-                    await user_error(chat, mid, uid, f"upload failed ({os.path.basename(path)}): {e}")
+                    await user_error(chat, mid, uid, f"upload failed ({os.path.basename(path)}): {e}",
+                                     allow_retry=not is_monitor)
                     return
             shutil.rmtree(outdir, ignore_errors=True)   # remove the now-empty job dir
             msg = ("🎉 " + tr("SENT_FILES", lang).format(total=total)) if total > 1 \
                 else "🎉 " + tr("SENT", lang)
+            stats = []                                   # a small closing line: total size + elapsed
+            if total_bytes:
+                stats.append(f"💾 {_fmt_size(total_bytes)}")
+            elapsed = time.time() - t_start
+            if elapsed >= 1:
+                stats.append(f"⏱️ {_fmt_eta(elapsed, lang)}")
+            if stats:
+                msg += "\n" + " · ".join(stats)
             skipped = j.get("skipped_subtitles") or []   # subtitles that weren't available
             if skipped:
                 msg += "\n⚠️ " + tr("SUBTITLES_THAT_WEREN_AVAILABLE", lang) \
@@ -356,7 +398,7 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                     and state.meta(dl_spec["service"]).get("geofence")):
                 await edit(chat, mid, f"🎬 {head_name}\n⏳ "
                            + tr("SWITCHING_TO_DOWNLOAD_VIA", lang),
-                           [[(tr("CANCEL_3", lang), f"cancel:{job_id}")]])
+                           [[(tr("CANCEL_3", lang), f"cxl:{job_id}")]])
                 return await launch_download(
                     chat, uid, mid, service=dl_spec["service"], title_id=dl_spec["title_id"],
                     profile=dl_spec["profile"], wanted=dl_spec["wanted"], quality=dl_spec["quality"],
@@ -367,8 +409,8 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                     upload_date=dl_spec.get("upload_date", ""), cover_url=dl_spec.get("cover_url", ""))
             detail = " | ".join(str(x) for x in (j.get("error"), j.get("worker_stderr"),
                                                  j.get("message")) if x) or "download failed"
-            await user_error(chat, mid, uid, detail)
+            await user_error(chat, mid, uid, detail, allow_retry=not is_monitor)
             return
     # loop exhausted without a terminal status (engine stuck) - clean up and tell the user
     shutil.rmtree(outdir, ignore_errors=True)
-    await user_error(chat, mid, uid, "the download did not finish in time")
+    await user_error(chat, mid, uid, "the download did not finish in time", allow_retry=not is_monitor)

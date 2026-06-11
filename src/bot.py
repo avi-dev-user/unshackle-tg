@@ -19,7 +19,7 @@ import aiohttp
 
 from . import admin, auth, config, monitors, state, uploader, users
 from .catalog_meta import detect_service, load_cat_overrides, set_cat_override, svc_needs_auth, unwrap_url
-from .download import download_file, start_download, to_sel
+from .download import download_file, launch_download, redraw_progress, retry_spec, start_download, to_sel
 from .errors import report_error
 from .i18n import tr
 from .menus import (_after_account, _search_labels, account_service, accounts_menu, ask_input, cdm_menu,
@@ -348,6 +348,15 @@ async def on_callback(cq: dict):
         return await accounts_menu(chat, uid, mid, int(data.split(":", 1)[1]))
     if data.startswith("use:"):
         return await _after_account(chat, uid, mid, data.split(":", 1)[1])
+    if data.startswith("cxl:"):                      # cancel pressed → confirm before stopping
+        job_id = data.split(":", 1)[1]
+        if job_id not in active_jobs.get(uid, {}):   # already done/cancelled
+            return await edit(chat, mid, tr("CANCELLED", lang), [[(tr("MENU", lang), "m:main")]])
+        return await edit(chat, mid, tr("CONFIRM_CANCEL_Q", lang),
+                          [[(tr("YES_CANCEL", lang), f"cancel:{job_id}")],
+                           [(tr("NO_CONTINUE", lang), f"cxlno:{job_id}")]])
+    if data.startswith("cxlno:"):                    # backed out of the confirm → restore progress
+        return await redraw_progress(chat, uid, mid, data.split(":", 1)[1])
     if data.startswith("cancel:"):
         job_id = data.split(":", 1)[1]
         if job_id in active_jobs.get(uid, {}) and not job_id.startswith("\x00"):   # caller's own real job
@@ -357,6 +366,12 @@ async def on_callback(cq: dict):
             except Exception:
                 pass
         return await edit(chat, mid, tr("CANCELLED", lang), [[(tr("MENU", lang), "m:main")]])
+    if data == "retry":                              # one-tap re-run of the last failed download
+        spec = retry_spec.get(uid)
+        if not spec:                                 # lost (e.g. bot restarted) → send them back to the menu
+            return await main_menu(chat, uid, mid)
+        await edit(chat, mid, "⏳ " + tr("STARTING_DOWNLOAD", lang))
+        return await launch_download(chat, uid, mid, **spec)
     if data.startswith("as:"):
         return await account_service(chat, uid, mid, data.split(":", 1)[1])
     if data.startswith("aaddc:"):
