@@ -8,6 +8,7 @@ NOT consume updates - the aiohttp frontend keeps owning getUpdates (no conflict)
 
 For >2GB a Premium userbot would be needed (deferred).
 """
+import asyncio
 import os
 import re
 import subprocess
@@ -199,7 +200,7 @@ async def _ensure_peer(client, chat_id: int) -> None:
 
 
 async def _send_via_botapi(chat_id: int, path: str, caption: str, cover: str | None,
-                           force_kind: str | None, lang: str) -> None:
+                           force_kind: str | None, lang: str, progress=None) -> None:
     """Send a file (<=2GB) through a local telegram-bot-api server (config.BOT_API_BASE).
     Unlike the MTProto bot client, the HTTP Bot API resolves a recipient that has started the
     bot natively, so there is no PEER_ID_INVALID. The file is streamed (aiohttp reads the open
@@ -254,19 +255,45 @@ async def _send_via_botapi(chat_id: int, path: str, caption: str, cover: str | N
     else:
         thumb = cover
 
+    total = os.path.getsize(path) if os.path.exists(path) else 0
     handles = [open(path, "rb")]
     form.add_field(field, handles[0], filename=fname)
     if thumb and os.path.exists(thumb):
         handles.append(open(thumb, "rb"))
         form.add_field("thumbnail", handles[-1], filename="thumb.jpg")
     url = f"{config.BOT_API_BASE}/bot{config.BOT_TOKEN}/{method}"
+
+    # progress: aiohttp streams the file by advancing its read position, so poll handle.tell()
+    # to report bytes-sent (the HTTP upload has no native callback like the MTProto client does).
+    async def _watch():
+        last = -1
+        while True:
+            await asyncio.sleep(1.5)
+            try:
+                pos = handles[0].tell()
+            except Exception:
+                continue
+            if progress and pos != last and 0 < pos <= total:
+                last = pos
+                try:
+                    await progress(pos, total)
+                except Exception:
+                    pass
+    watcher = asyncio.ensure_future(_watch()) if (progress and total) else None
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=7200)) as s:
             async with s.post(url, data=form) as r:
                 res = await r.json(content_type=None)
         if not isinstance(res, dict) or not res.get("ok"):
             raise RuntimeError(f"Bot API {method} failed: {(res or {}).get('description', res)}")
+        if progress:
+            try:
+                await progress(total, total)   # ensure the bar lands on 100%
+            except Exception:
+                pass
     finally:
+        if watcher:
+            watcher.cancel()
         for h in handles:
             try:
                 h.close()
@@ -300,7 +327,7 @@ async def send(chat_id: int, path: str, caption: str, cover: str | None = None,
     # <=2GB through the local Bot API server (resolves the recipient natively - no PEER_ID_INVALID).
     # Only >2GB needs the MTProto Premium user client.
     if 0 < size <= BOT_LIMIT and config.BOT_API_BASE:
-        return await _send_via_botapi(chat_id, path, caption, cover, force_kind, lang)
+        return await _send_via_botapi(chat_id, path, caption, cover, force_kind, lang, progress)
     if size > BOT_LIMIT:
         if _premium is None:
             raise RuntimeError("The file is larger than 2GB - a Premium account (PREMIUM_SESSION) "
