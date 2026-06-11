@@ -271,6 +271,12 @@ async def on_callback(cq: dict):
         return await recordings.menu(chat, uid, mid)
     if data.startswith("rec:") and users.is_admin(uid):
         rest = data.split(":", 1)[1]
+        if rest == "pause":                          # skip live content until resumed
+            recordings.pause(uid)
+            return await call("answerCallbackQuery", callback_query_id=cq["id"], text="⏸️")
+        if rest == "resume":
+            recordings.resume(uid)
+            return await call("answerCallbackQuery", callback_query_id=cq["id"], text="▶️")
         if rest == "stop":                           # end a running recording early (keep partial)
             recordings.stop(uid)
             return await call("answerCallbackQuery", callback_query_id=cq["id"],

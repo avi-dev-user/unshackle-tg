@@ -68,10 +68,9 @@ def _safe(name: str) -> str:
     return "".join(c if c.isalnum() or c in "-_" else "_" for c in name)[:40] or "rec"
 
 
-async def _capture(uid: int, url: str, key: str, seconds: int, out: str) -> int:
-    """ffmpeg: copy the highest video + audio, decrypting CENC in place. Async (never blocks the
-    loop). The proc is tracked so a Stop button can end it early - ffmpeg finalizes a valid file
-    on SIGTERM, so the partial capture is still playable and gets delivered."""
+async def _segment(uid: int, url: str, key: str, seconds: int, out: str) -> None:
+    """Record ONE segment with ffmpeg (-t seconds), copying the highest video+audio and decrypting
+    CENC in place. The proc is tracked so Pause/Stop can SIGTERM it (ffmpeg finalizes a valid file)."""
     env = dict(os.environ)
     env["http_proxy"] = env["https_proxy"] = REC_PROXY
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
@@ -83,20 +82,68 @@ async def _capture(uid: int, url: str, key: str, seconds: int, out: str) -> int:
                                                 stderr=asyncio.subprocess.DEVNULL)
     active[uid]["proc"] = proc
     await proc.wait()
-    return proc.returncode or 0
+
+
+def _signal(uid: int):
+    proc = (active.get(uid) or {}).get("proc")
+    if proc and proc.returncode is None:
+        try:
+            proc.terminate()                       # ffmpeg finalizes the current segment
+        except Exception:
+            pass
+
+
+def pause(uid: int) -> None:
+    """Pause: end the current segment now. The live edge moves on during the pause (that content
+    is intentionally skipped); resuming starts a fresh segment that is concatenated at the end."""
+    rec = active.get(uid)
+    if rec and not rec.get("paused"):
+        rec["paused"] = True
+        _signal(uid)
+
+
+def resume(uid: int) -> None:
+    rec = active.get(uid)
+    if rec:
+        rec["paused"] = False                      # the run loop starts the next segment
 
 
 def stop(uid: int) -> bool:
-    """End a running recording early (graceful SIGTERM → ffmpeg finalizes the file)."""
-    rec = active.get(uid) or {}
-    proc = rec.get("proc")
-    if proc and proc.returncode is None:
+    rec = active.get(uid)
+    if not rec:
+        return False
+    rec["stop"] = True
+    _signal(uid)
+    return True
+
+
+async def _concat(segments: list, final: str) -> str:
+    """Join the recorded segments (same codec → -c copy) into one file. One segment → just rename."""
+    segments = [s for s in segments if os.path.exists(s) and os.path.getsize(s) > 0]
+    if not segments:
+        return ""
+    if len(segments) == 1:
+        os.replace(segments[0], final)
+        return final
+    listf = final + ".txt"
+    with open(listf, "w", encoding="utf-8") as fh:
+        for s in segments:
+            fh.write(f"file '{s}'\n")
+    proc = await asyncio.create_subprocess_exec(
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0",
+        "-i", listf, "-c", "copy", final,
+        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+    await proc.wait()
+    for s in segments:
         try:
-            proc.terminate()
-            return True
-        except Exception:
+            os.remove(s)
+        except OSError:
             pass
-    return False
+    try:
+        os.remove(listf)
+    except OSError:
+        pass
+    return final if (os.path.exists(final) and os.path.getsize(final) > 0) else ""
 
 
 async def _deliver(chat: int, uid: int, mid: int, path: str, title: str, lang: str) -> None:
@@ -123,25 +170,50 @@ async def _deliver(chat: int, uid: int, mid: int, path: str, title: str, lang: s
                [[(tr("MENU", lang), "m:main")]])
 
 
+async def _status(chat: int, mid: int, name: str, paused: bool, lang: str) -> None:
+    if paused:
+        body = f"⏸️ {html.escape(name)}\n" + tr("REC_PAUSED", lang)
+        rows = [[(tr("REC_RESUME", lang), "rec:resume")], [(tr("REC_STOP", lang), "rec:stop")]]
+    else:
+        body = f"🔴 {html.escape(name)}\n⏺️ " + tr("REC_RECORDING_LIVE", lang)
+        rows = [[(tr("REC_PAUSE", lang), "rec:pause")], [(tr("REC_STOP", lang), "rec:stop")]]
+    try:
+        await edit(chat, mid, body, rows)
+    except Exception:
+        pass
+
+
 async def _run(chat: int, uid: int, mid: int, name: str, seconds: int):
     lang = users.lang(uid)
     ch = load().get(name) or {}
     if not ch.get("url"):
         return await edit(chat, mid, "🔴 " + tr("REC_NO_SUCH_CHANNEL", lang), [[(tr("MENU", lang), "m:main")]])
     os.makedirs(REC_DIR, exist_ok=True)
-    out = os.path.join(REC_DIR, f"{_safe(name)}_{int(time.time())}.mkv")
-    active[uid] = {"name": name}
+    base = os.path.join(REC_DIR, f"{_safe(name)}_{int(time.time())}")
+    active[uid] = {"name": name, "paused": False, "stop": False, "proc": None}
+    segments, total, idx = [], 0.0, 0
     try:
-        await edit(chat, mid, f"🔴 {html.escape(name)}\n⏺️ " + tr("REC_RECORDING", lang).format(
-            min=seconds // 60), [[(tr("REC_STOP", lang), "rec:stop")]])
-        await _capture(uid, ch["url"], ch.get("key", ""), seconds, out)
-        # deliver whenever there is a non-empty file: an early Stop (SIGTERM) yields rc!=0 but a
-        # valid partial capture; only a truly empty/missing file is a failure.
-        if not (os.path.exists(out) and os.path.getsize(out) > 0):
-            if os.path.exists(out):
-                os.remove(out)
+        while not active[uid]["stop"] and total < seconds - 1:
+            if active[uid]["paused"]:
+                await _status(chat, mid, name, True, lang)
+                while active[uid]["paused"] and not active[uid]["stop"]:
+                    await asyncio.sleep(1)          # content during the pause is intentionally skipped
+                continue
+            await _status(chat, mid, name, False, lang)
+            seg = f"{base}_{idx}.mkv"
+            idx += 1
+            t0 = time.time()
+            await _segment(uid, ch["url"], ch.get("key", ""), int(seconds - total), seg)
+            total += time.time() - t0
+            if os.path.exists(seg) and os.path.getsize(seg) > 0:
+                segments.append(seg)
+            if not active[uid]["paused"] and not active[uid]["stop"]:
+                break                               # segment hit its time cap → natural finish
+        await edit(chat, mid, "🧩 " + tr("REC_FINALIZING", lang))
+        final = await _concat(segments, base + ".mkv")
+        if not final:
             return await edit(chat, mid, "🔴 " + tr("REC_FAILED", lang), [[(tr("MENU", lang), "m:main")]])
-        await _deliver(chat, uid, mid, out, name, lang)
+        await _deliver(chat, uid, mid, final, name, lang)
     except Exception as e:
         await report_error("recording", e, uid)
         try:
