@@ -93,9 +93,10 @@ def build_flags(uid: int, service: str, profile: str, sel, quality,
         flags["cdm"] = cdm
     # Use the region proxy ONLY for the geo-gated manifest/API; download the media segments
     # directly (usually faster than routing bulk traffic through the proxy). No effect on
-    # services without a proxy. (If a service's segments are themselves geo-locked, that
-    # service's direct download would fail - handle per-service if it ever happens.)
-    flags["no_proxy_download"] = True
+    # services without a proxy. Services whose segments are themselves geo-locked (e.g. MAKO's
+    # CloudFront 900p) must route segments through the proxy too - list them in SEGMENT_PROXY_SERVICES.
+    if service not in config.SEGMENT_PROXY_SERVICES:
+        flags["no_proxy_download"] = True
     flags["skip_subtitle_errors"] = True   # a failed subtitle never aborts the download
     return flags, q
 
