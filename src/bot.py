@@ -370,6 +370,10 @@ async def on_callback(cq: dict):
         spec = retry_spec.get(uid)
         if not spec:                                 # lost (e.g. bot restarted) → send them back to the menu
             return await main_menu(chat, uid, mid)
+        limit = users.concurrency_limit(uid)         # same friendly pre-check as start_download, so the
+        if len(active_jobs.get(uid, ())) >= limit:   # message never hangs on a silently-gated launch
+            return await edit(chat, mid, "⏳ " + tr("YOU_RE_ALREADY_DOWNLOADING", lang).format(limit=limit),
+                              [[(tr("MY_DOWNLOADS", lang), "m:dls")], [(tr("MENU", lang), "m:main")]])
         await edit(chat, mid, "⏳ " + tr("STARTING_DOWNLOAD", lang))
         return await launch_download(chat, uid, mid, **spec)
     if data.startswith("as:"):
