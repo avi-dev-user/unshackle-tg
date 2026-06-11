@@ -68,8 +68,10 @@ def _safe(name: str) -> str:
     return "".join(c if c.isalnum() or c in "-_" else "_" for c in name)[:40] or "rec"
 
 
-async def _capture(url: str, key: str, seconds: int, out: str) -> int:
-    """ffmpeg: copy the highest video + audio, decrypting CENC in place. Async (never blocks the loop)."""
+async def _capture(uid: int, url: str, key: str, seconds: int, out: str) -> int:
+    """ffmpeg: copy the highest video + audio, decrypting CENC in place. Async (never blocks the
+    loop). The proc is tracked so a Stop button can end it early - ffmpeg finalizes a valid file
+    on SIGTERM, so the partial capture is still playable and gets delivered."""
     env = dict(os.environ)
     env["http_proxy"] = env["https_proxy"] = REC_PROXY
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
@@ -79,8 +81,22 @@ async def _capture(url: str, key: str, seconds: int, out: str) -> int:
     proc = await asyncio.create_subprocess_exec(*cmd, env=env,
                                                 stdout=asyncio.subprocess.DEVNULL,
                                                 stderr=asyncio.subprocess.DEVNULL)
+    active[uid]["proc"] = proc
     await proc.wait()
     return proc.returncode or 0
+
+
+def stop(uid: int) -> bool:
+    """End a running recording early (graceful SIGTERM → ffmpeg finalizes the file)."""
+    rec = active.get(uid) or {}
+    proc = rec.get("proc")
+    if proc and proc.returncode is None:
+        try:
+            proc.terminate()
+            return True
+        except Exception:
+            pass
+    return False
 
 
 async def _deliver(chat: int, uid: int, mid: int, path: str, title: str, lang: str) -> None:
@@ -114,12 +130,14 @@ async def _run(chat: int, uid: int, mid: int, name: str, seconds: int):
         return await edit(chat, mid, "🔴 " + tr("REC_NO_SUCH_CHANNEL", lang), [[(tr("MENU", lang), "m:main")]])
     os.makedirs(REC_DIR, exist_ok=True)
     out = os.path.join(REC_DIR, f"{_safe(name)}_{int(time.time())}.mkv")
-    active[uid] = name
+    active[uid] = {"name": name}
     try:
         await edit(chat, mid, f"🔴 {html.escape(name)}\n⏺️ " + tr("REC_RECORDING", lang).format(
-            min=seconds // 60), [[(tr("MENU", lang), "m:main")]])
-        rc = await _capture(ch["url"], ch.get("key", ""), seconds, out)
-        if rc != 0 or not (os.path.exists(out) and os.path.getsize(out) > 0):
+            min=seconds // 60), [[(tr("REC_STOP", lang), "rec:stop")]])
+        await _capture(uid, ch["url"], ch.get("key", ""), seconds, out)
+        # deliver whenever there is a non-empty file: an early Stop (SIGTERM) yields rc!=0 but a
+        # valid partial capture; only a truly empty/missing file is a failure.
+        if not (os.path.exists(out) and os.path.getsize(out) > 0):
             if os.path.exists(out):
                 os.remove(out)
             return await edit(chat, mid, "🔴 " + tr("REC_FAILED", lang), [[(tr("MENU", lang), "m:main")]])
@@ -150,7 +168,7 @@ async def menu(chat: int, uid: int, mid: int):
     rows.append([(tr("MENU", lang), "m:main")])
     head = tr("REC_TITLE", lang)
     if active.get(uid):
-        head += "\n⏺️ " + tr("REC_IN_PROGRESS", lang).format(name=html.escape(active[uid]))
+        head += "\n⏺️ " + tr("REC_IN_PROGRESS", lang).format(name=html.escape(active[uid].get("name", "")))
     await edit(chat, mid, head, rows)
 
 
