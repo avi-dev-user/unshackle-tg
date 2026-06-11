@@ -71,7 +71,8 @@ async def user_error(chat: int, mid: int, uid, e, back=None, allow_retry: bool =
     elif allow_retry and not any(k in low for k in (
             "available in your", "geo-block", "geoblock", "blocked in your", "premium", "protected",
             "sign in", "authenticat", "login", "needs auth", "cookies", "widevine", "playready",
-            "cdm", "license", "decrypt", " drm", "no matching", "no content", "no episodes", "not found")):
+            "cdm", "license", "decrypt", " drm", "no matching", "no content", "no episodes", "not found",
+            "no playable", "entitle", "subscri", "concurrency")):
         rows.append([(tr("TRY_AGAIN", lang), "retry")])
     rows.append([back])
     await edit(chat, mid, _friendly(msg, lang), rows)
