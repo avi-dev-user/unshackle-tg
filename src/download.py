@@ -210,8 +210,11 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
     tag = ("🤖 " + tr("MONITOR", lang) + " · ") if is_monitor else ""
     name = (active_jobs.get(uid, {}).get(job_id) or {}).get("name") or sess(uid).get("name") \
         or tr("DOWNLOAD", lang)
-    head_name = tag + html.escape(str(name))[:48]
+    svc = (dl_spec or {}).get("service") or sess(uid).get("service") or ""
+    head_name = tag + html.escape(str(name))[:48] + (f" · 📺 {html.escape(svc)}" if svc else "")
     hist = []                                 # (time, pct) samples → ETA estimate
+    stall = {"p": -1, "s": None, "t": time.time()}   # watchdog: last (pct, segments, change-time)
+    STALL_SECS = 75                           # no progress this long (early) → fall back to proxy
 
     def _cancelled() -> bool:
         return bool((active_jobs.get(uid, {}).get(job_id) or {}).get("cancelled"))
@@ -237,6 +240,7 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
             line = f"🎬 {head_name}\n⏳ " + tr("STARTING", lang)
         elif status in ("downloading", "running"):
             now = time.time()
+            sd, st_ = j.get("segments_done"), j.get("segments_total")
             hist.append((now, prog))
             hist[:] = [(t, p) for (t, p) in hist if now - t <= 30] or hist[-1:]
             eta = ""
@@ -244,8 +248,30 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                 dt, dp = hist[-1][0] - hist[0][0], hist[-1][1] - hist[0][1]
                 if dt > 0 and dp > 0:
                     eta = tr("LEFT", lang).format(t=_fmt_eta((100 - prog) * dt / dp, lang))
+            # stall watchdog: geo-locked segments downloaded directly HANG (no progress) rather than
+            # failing, so the failed-retry below never fires. After STALL_SECS with no advance early
+            # in a direct geofenced download, cancel and fall back to the proxy (same as a failure).
+            if prog != stall["p"] or sd != stall["s"]:
+                stall.update(p=prog, s=sd, t=now)
+            elif (now - stall["t"] > STALL_SECS and prog < 50 and dl_spec
+                  and not dl_spec.get("retried") and dl_spec["flags"].get("no_proxy_download")
+                  and state.meta(dl_spec["service"]).get("geofence")):
+                try:
+                    await engine.cancel(job_id)
+                except Exception:
+                    pass
+                await edit(chat, mid, f"🎬 {head_name}\n⏳ " + tr("SWITCHING_TO_DOWNLOAD_VIA", lang),
+                           [[(tr("CANCEL_3", lang), f"cancel:{job_id}")]])
+                return await launch_download(
+                    chat, uid, mid, service=dl_spec["service"], title_id=dl_spec["title_id"],
+                    profile=dl_spec["profile"], wanted=dl_spec["wanted"], quality=dl_spec["quality"],
+                    flags={**dl_spec["flags"], "no_proxy_download": False}, name=dl_spec["name"],
+                    src_url=src_url, source_media=source_media, retried=True,
+                    send_as=dl_spec.get("send_as"), cover=dl_spec.get("cover"), is_monitor=is_monitor,
+                    gate=False, description=dl_spec.get("description", ""),
+                    upload_date=dl_spec.get("upload_date", ""), cover_url=dl_spec.get("cover_url", ""))
             line = _render_progress(head=f"🎬 {head_name}\n⬇️ {_phase(j.get('phase'), lang)}",
-                                    pct=prog, eta=eta)
+                                    pct=prog, eta=eta, segs_done=sd, segs_total=st_)
         else:
             line = f"🎬 {head_name}\n⏳ {status}"
         if line != last:
@@ -328,8 +354,9 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                     profile=dl_spec["profile"], wanted=dl_spec["wanted"], quality=dl_spec["quality"],
                     flags={**dl_spec["flags"], "no_proxy_download": False}, name=dl_spec["name"],
                     src_url=src_url, source_media=source_media, retried=True,
-                    send_as=dl_spec.get("send_as"), cover=dl_spec.get("cover"),
-                    is_monitor=is_monitor, gate=False)   # continues the existing slot, don't re-gate
+                    send_as=dl_spec.get("send_as"), cover=dl_spec.get("cover"), is_monitor=is_monitor,
+                    gate=False, description=dl_spec.get("description", ""),   # continues the slot, don't re-gate
+                    upload_date=dl_spec.get("upload_date", ""), cover_url=dl_spec.get("cover_url", ""))
             detail = " | ".join(str(x) for x in (j.get("error"), j.get("worker_stderr"),
                                                  j.get("message")) if x) or "download failed"
             await user_error(chat, mid, uid, detail)
