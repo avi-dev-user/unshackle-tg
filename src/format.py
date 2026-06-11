@@ -29,13 +29,18 @@ def _fmt_eta(secs, lang: str = "en") -> str:
     return f"{h}:{m:02d}:{s:02d}"
 
 
-def _render_progress(*, head: str, pct, done_b=None, total_b=None, speed_bps=None, eta=None) -> str:
-    """A tidy multi-line progress block, shared by download and upload."""
+def _render_progress(*, head: str, pct, done_b=None, total_b=None, speed_bps=None, eta=None,
+                     segs_done=None, segs_total=None) -> str:
+    """A tidy multi-line progress block, shared by download and upload.
+    Optional stats render only when present: 📦 segments (download), 💾 size + ⚡ speed (upload),
+    ⏱️ ETA (both) - keeps the bar so it stays in our visual style."""
     pct = max(0, min(100, int(pct or 0)))
     lines = [head, f"{_bar(pct)}  {pct}%"]
     extra = []
+    if segs_total:
+        extra.append(f"📦 {int(segs_done or 0)}/{int(segs_total)}")
     if done_b is not None and total_b:
-        extra.append(f"📦 {_fmt_size(done_b)} / {_fmt_size(total_b)}")
+        extra.append(f"💾 {_fmt_size(done_b)} / {_fmt_size(total_b)}")
     if speed_bps:
         extra.append(f"⚡ {_fmt_size(speed_bps)}/s")
     if eta is not None and eta != "":
