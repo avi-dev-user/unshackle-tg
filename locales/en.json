@@ -292,6 +292,7 @@
   "CAP_PORTRAIT": "Portrait",
   "CAP_AUDIO": "Audio",
   "CAP_SUBTITLES_CAP": "Subtitles",
+  "CONTENT_NOT_IN_YOUR_PLAN": "🚫 This title isn't available on your account - it's not included in your subscription/package.",
   "TRY_AGAIN": "🔁 Try again",
   "CONFIRM_CANCEL_Q": "Cancel this download?",
   "YES_CANCEL": "✖️ Yes, cancel",
