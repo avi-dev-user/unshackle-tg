@@ -246,6 +246,21 @@ async def _send_via_botapi(chat_id: int, path: str, caption: str, cover: str | N
             os.remove(thumb)
 
 
+async def _copy_via_botapi(chat_id: int, from_chat_id: int, message_id: int,
+                           caption: str, lang: str) -> None:
+    """Copy an already-uploaded message (in the dump channel) to the recipient via the Bot API.
+    Used for the >2GB relay: the Bot API resolves the user natively, and copyMessage re-sends the
+    media by reference (no re-upload, no size limit). The bot must be a member of from_chat_id."""
+    url = f"{config.BOT_API_BASE}/bot{config.BOT_TOKEN}/copyMessage"
+    data = {"chat_id": chat_id, "from_chat_id": from_chat_id, "message_id": message_id,
+            "caption": caption, "parse_mode": "HTML"}
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as s:
+        async with s.post(url, json=data) as r:
+            res = await r.json(content_type=None)
+    if not isinstance(res, dict) or not res.get("ok"):
+        raise RuntimeError(f"Bot API copyMessage failed: {(res or {}).get('description', res)}")
+
+
 async def send(chat_id: int, path: str, caption: str, cover: str | None = None,
                progress=None, force_kind: str | None = None, lang: str = "en") -> None:
     """Send the downloaded file with the right method + caption (+ cover for music).
@@ -260,12 +275,26 @@ async def send(chat_id: int, path: str, caption: str, cover: str | None = None,
         if _premium is None:
             raise RuntimeError("The file is larger than 2GB - a Premium account (PREMIUM_SESSION) "
                                "is required. Choose a lower quality for now.")
-        client = _premium
+        # >2GB can't go through the Bot API (2GB cap). Upload via Premium (MTProto, no cap) to the
+        # dump channel, then let the bot copy it to the user - the Bot API resolves the user
+        # natively, so no PEER_ID_INVALID (the Premium user client can't resolve an unmet peer).
+        if config.DUMP_CHANNEL and config.BOT_API_BASE:
+            msg = await _pyro_send(_premium, config.DUMP_CHANNEL, path, caption, cover,
+                                   force_kind, lang, progress)
+            return await _copy_via_botapi(chat_id, config.DUMP_CHANNEL, msg.id, caption, lang)
+        client = _premium     # no dump channel configured - fall back to a direct Premium send
     else:
         if _app is None:
             raise RuntimeError("uploader not started (missing API_ID/API_HASH)")
         client = _app
     await _ensure_peer(client, chat_id)   # avoid PEER_ID_INVALID on an unmet peer (fresh session)
+    await _pyro_send(client, chat_id, path, caption, cover, force_kind, lang, progress)
+
+
+async def _pyro_send(client, chat_id: int, path: str, caption: str, cover: str | None,
+                     force_kind: str | None, lang: str, progress=None):
+    """Send a file via a Pyrogram client (bot or Premium) with the right kind + metadata.
+    Returns the sent Message (so a >2GB relay can copy it from the dump channel to the user)."""
     kind = metadata.media_kind(path)
     if force_kind == "file":          # user chose to receive it as a document
         kind = "document"
@@ -295,8 +324,9 @@ async def send(chat_id: int, path: str, caption: str, cover: str | None = None,
         # generate a poster frame so Telegram shows a real thumbnail (not a grey box)
         thumb = cover or _make_video_thumb(path, vdur)
         try:
-            await client.send_video(video=path, thumb=thumb, width=vw or None, height=vh or None,
-                                  duration=vdur or None, supports_streaming=True, **common)
+            return await client.send_video(video=path, thumb=thumb, width=vw or None,
+                                  height=vh or None, duration=vdur or None,
+                                  supports_streaming=True, **common)
         finally:
             if thumb and thumb != cover and os.path.exists(thumb):
                 os.remove(thumb)
@@ -314,7 +344,7 @@ async def send(chat_id: int, path: str, caption: str, cover: str | None = None,
                 send_path = tmp
         dur = int(float((info.get("format", {}) or {}).get("duration") or 0))
         try:
-            await client.send_audio(audio=send_path, thumb=cover, title=title or None,
+            return await client.send_audio(audio=send_path, thumb=cover, title=title or None,
                                   performer=performer or None, duration=dur, **common)
         finally:
             if tmp and os.path.exists(tmp):
@@ -326,7 +356,7 @@ async def send(chat_id: int, path: str, caption: str, cover: str | None = None,
             vdur = int(float((info.get("format", {}) or {}).get("duration") or 0))
             tmp_thumb = thumb = _make_video_thumb(path, vdur)
         try:
-            await client.send_document(document=path, thumb=thumb, **common)
+            return await client.send_document(document=path, thumb=thumb, **common)
         finally:
             if tmp_thumb and os.path.exists(tmp_thumb):
                 os.remove(tmp_thumb)
@@ -371,6 +401,8 @@ async def deliver(chat_id: int, path: str, service: str = "", source_url: str = 
                     f"({4 if _premium else 2}GiB) and could not be split automatically - choose a lower quality.")
             await send(chat_id, path, caption, cover, progress=progress, force_kind=force_kind, lang=lang)
     finally:
+        # always free disk - even on a failed/partial upload, the local file(s) must go
+        # (otherwise every failed attempt leaves a multi-GB file behind and fills the disk).
         if cover and os.path.exists(cover):
             os.remove(cover)
         for part in (parts or []):
@@ -378,11 +410,10 @@ async def deliver(chat_id: int, path: str, service: str = "", source_url: str = 
                 os.remove(part)
             except OSError:
                 pass
-    # cleanup: remove the file and its parent dir if now empty (don't keep it locally)
-    try:
-        os.remove(path)
-        parent = os.path.dirname(path)
-        if parent and os.path.isdir(parent) and not os.listdir(parent):
-            os.rmdir(parent)
-    except OSError:
-        pass
+        try:
+            os.remove(path)
+            parent = os.path.dirname(path)
+            if parent and os.path.isdir(parent) and not os.listdir(parent):
+                os.rmdir(parent)
+        except OSError:
+            pass

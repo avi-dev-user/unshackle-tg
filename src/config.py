@@ -37,6 +37,10 @@ PREMIUM_SESSION = os.environ.get("PREMIUM_SESSION", "")
 # through it (HTTP), which resolves the recipient natively (no MTProto peer/access_hash issue
 # the Pyrogram bot client hits). >2GB still goes through the Premium user client.
 BOT_API_BASE = os.environ.get("UPLOAD_BOT_API_BASE", "").rstrip("/")
+# Dump channel for >2GB relay: the Premium user client (MTProto, no 2GB cap) uploads the big
+# file here, then the bot copies it to the recipient via the Bot API (which resolves the user
+# natively - no PEER_ID_INVALID). Requires BOTH the Premium account and the bot to be members.
+DUMP_CHANNEL = int(os.environ.get("UPLOAD_DUMP_CHANNEL") or 0)
 ADMIN_IDS = _ids("ADMIN_IDS")
 
 # --- unshackle REST API ---
