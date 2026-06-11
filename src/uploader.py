@@ -200,7 +200,7 @@ async def _ensure_peer(client, chat_id: int) -> None:
 
 
 async def _send_via_botapi(chat_id: int, path: str, caption: str, cover: str | None,
-                           force_kind: str | None, lang: str, progress=None) -> None:
+                           force_kind: str | None, lang: str, progress=None, phase_cb=None) -> None:
     """Send a file (<=2GB) through a local telegram-bot-api server (config.BOT_API_BASE).
     Unlike the MTProto bot client, the HTTP Bot API resolves a recipient that has started the
     bot natively, so there is no PEER_ID_INVALID. The file is streamed (aiohttp reads the open
@@ -267,13 +267,24 @@ async def _send_via_botapi(chat_id: int, path: str, caption: str, cover: str | N
     # to report bytes-sent (the HTTP upload has no native callback like the MTProto client does).
     async def _watch():
         last = -1
+        signaled = False
         while True:
             await asyncio.sleep(1.5)
             try:
                 pos = handles[0].tell()
             except Exception:
                 continue
-            if progress and pos != last and 0 < pos <= total:
+            # the local buffer fills fast (localhost); once it's ~done, the real (invisible) upload
+            # to Telegram begins - switch to a 'uploading to Telegram' status instead of a dead 100%.
+            if not signaled and total and pos >= total * 0.98:
+                signaled = True
+                if phase_cb:
+                    try:
+                        await phase_cb()
+                    except Exception:
+                        pass
+                continue
+            if progress and not signaled and pos != last and 0 < pos <= total:
                 last = pos
                 try:
                     await progress(pos, total)
@@ -286,11 +297,6 @@ async def _send_via_botapi(chat_id: int, path: str, caption: str, cover: str | N
                 res = await r.json(content_type=None)
         if not isinstance(res, dict) or not res.get("ok"):
             raise RuntimeError(f"Bot API {method} failed: {(res or {}).get('description', res)}")
-        if progress:
-            try:
-                await progress(total, total)   # ensure the bar lands on 100%
-            except Exception:
-                pass
     finally:
         if watcher:
             watcher.cancel()
@@ -319,7 +325,7 @@ async def _copy_via_botapi(chat_id: int, from_chat_id: int, message_id: int,
 
 
 async def send(chat_id: int, path: str, caption: str, cover: str | None = None,
-               progress=None, force_kind: str | None = None, lang: str = "en") -> None:
+               progress=None, force_kind: str | None = None, lang: str = "en", phase_cb=None) -> None:
     """Send the downloaded file with the right method + caption (+ cover for music).
     force_kind: 'video' → streamable video, 'file' → document (both keep a thumbnail).
     progress(current, total) is Pyrogram's real-time upload callback."""
@@ -327,7 +333,7 @@ async def send(chat_id: int, path: str, caption: str, cover: str | None = None,
     # <=2GB through the local Bot API server (resolves the recipient natively - no PEER_ID_INVALID).
     # Only >2GB needs the MTProto Premium user client.
     if 0 < size <= BOT_LIMIT and config.BOT_API_BASE:
-        return await _send_via_botapi(chat_id, path, caption, cover, force_kind, lang, progress)
+        return await _send_via_botapi(chat_id, path, caption, cover, force_kind, lang, progress, phase_cb)
     if size > BOT_LIMIT:
         if _premium is None:
             raise RuntimeError("The file is larger than 2GB - a Premium account (PREMIUM_SESSION) "
@@ -423,7 +429,7 @@ async def deliver(chat_id: int, path: str, service: str = "", source_url: str = 
                   media_url: str = "", progress=None, force_kind: str | None = None,
                   cover_path: str | None = None, lang: str = "en",
                   display_title: str = "", description: str = "", upload_date: str = "",
-                  cover_url: str = "") -> None:
+                  cover_url: str = "", phase_cb=None) -> None:
     """Build caption + cover, send, then delete the local file (and empty parent dir).
     media_url = the direct source file (e.g. the episode's mp3) → enriches music
     tags/cover that the .mka remux dropped. progress = real-time upload callback."""
@@ -455,13 +461,13 @@ async def deliver(chat_id: int, path: str, service: str = "", source_url: str = 
             n = len(parts)
             for i, part in enumerate(parts, 1):
                 cap = f"{caption}\n\n📦 " + tr("CAP_PART", lang).format(i=i, n=n)
-                await send(chat_id, part, cap, cover, progress=progress, force_kind=force_kind, lang=lang)
+                await send(chat_id, part, cap, cover, progress=progress, force_kind=force_kind, lang=lang, phase_cb=phase_cb)
         else:
             if size > max_limit:             # couldn't split → tell the user clearly
                 raise RuntimeError(
                     f"The file ({size / 1024**3:.1f}GiB) is larger than the allowed "
                     f"({4 if _premium else 2}GiB) and could not be split automatically - choose a lower quality.")
-            await send(chat_id, path, caption, cover, progress=progress, force_kind=force_kind, lang=lang)
+            await send(chat_id, path, caption, cover, progress=progress, force_kind=force_kind, lang=lang, phase_cb=phase_cb)
     finally:
         # always free disk - even on a failed/partial upload, the local file(s) must go
         # (otherwise every failed attempt leaves a multi-GB file behind and fills the disk).

@@ -30,10 +30,10 @@ def _fmt_eta(secs, lang: str = "en") -> str:
 
 
 def _render_progress(*, head: str, pct, done_b=None, total_b=None, speed_bps=None, eta=None,
-                     segs_done=None, segs_total=None) -> str:
+                     segs_done=None, segs_total=None, speed_str=None) -> str:
     """A tidy multi-line progress block, shared by download and upload.
-    Optional stats render only when present: 📦 segments (download), 💾 size + ⚡ speed (upload),
-    ⏱️ ETA (both) - keeps the bar so it stays in our visual style."""
+    Optional stats render only when present: 📦 segments + ⚡ speed (download), 💾 size + ⚡ speed
+    (upload), ⏱️ ETA (both) - keeps the bar so it stays in our visual style."""
     pct = max(0, min(100, int(pct or 0)))
     lines = [head, f"{_bar(pct)}  {pct}%"]
     extra = []
@@ -41,7 +41,9 @@ def _render_progress(*, head: str, pct, done_b=None, total_b=None, speed_bps=Non
         extra.append(f"📦 {int(segs_done or 0)}/{int(segs_total)}")
     if done_b is not None and total_b:
         extra.append(f"💾 {_fmt_size(done_b)} / {_fmt_size(total_b)}")
-    if speed_bps:
+    if speed_str:                                # download: unshackle already formats it ("3.2 MB/s")
+        extra.append(f"⚡ {speed_str}")
+    elif speed_bps:                              # upload: bytes/sec we format ourselves
         extra.append(f"⚡ {_fmt_size(speed_bps)}/s")
     if eta is not None and eta != "":
         extra.append(f"⏱️ {eta}")
