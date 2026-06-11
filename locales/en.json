@@ -252,6 +252,7 @@
   "TYPE_WHAT_TO_SEARCH": "🔍 Type what to search on",
   "UNEXPECTED_ERROR_DURING_DOWNLOAD": "Unexpected error during download/upload. The admin has been notified.",
   "UPLOADING": "Uploading",
+  "UPLOADING_TO_TELEGRAM": "uploading to Telegram, a moment",
   "UPLOAD_CDM_FILE_WVD": "➕ Upload a CDM file (.wvd)",
   "UPLOAD_THUMBNAIL": "📤 Upload a thumbnail",
   "USER": "👤 user",

@@ -271,7 +271,8 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                     gate=False, description=dl_spec.get("description", ""),
                     upload_date=dl_spec.get("upload_date", ""), cover_url=dl_spec.get("cover_url", ""))
             line = _render_progress(head=f"🎬 {head_name}\n⬇️ {_phase(j.get('phase'), lang)}",
-                                    pct=prog, eta=eta, segs_done=sd, segs_total=st_)
+                                    pct=prog, eta=eta, segs_done=sd, segs_total=st_,
+                                    speed_str=j.get("speed"))
         else:
             line = f"🎬 {head_name}\n⏳ {status}"
         if line != last:
@@ -316,9 +317,16 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                         except Exception:
                             pass
 
+                async def on_phase(_head=head):                  # Bot API: localhost buffer done,
+                    try:                                         # the real upload to Telegram begins
+                        await edit(chat, mid, f"{_head}\n⏳ " + tr("UPLOADING_TO_TELEGRAM", lang),
+                                   [[(tr("CANCEL_3", lang), f"cancel:{job_id}")]])
+                    except Exception:
+                        pass
+
                 try:
                     await uploader.deliver(chat, path, service=src_name, source_url=src_url,
-                                           media_url=source_media, progress=on_up,
+                                           media_url=source_media, progress=on_up, phase_cb=on_phase,
                                            force_kind=(dl_spec or {}).get("send_as"),
                                            cover_path=(dl_spec or {}).get("cover"), lang=lang,
                                            display_title=(dl_spec or {}).get("name") or "",

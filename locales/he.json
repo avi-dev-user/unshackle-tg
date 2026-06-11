@@ -252,6 +252,7 @@
   "TYPE_WHAT_TO_SEARCH": "🔍 הקלד מה לחפש ב-",
   "UNEXPECTED_ERROR_DURING_DOWNLOAD": "שגיאה בלתי צפויה בהורדה/העלאה. המנהל קיבל התראה.",
   "UPLOADING": "מעלה",
+  "UPLOADING_TO_TELEGRAM": "מעלה לטלגרם, רגע",
   "UPLOAD_CDM_FILE_WVD": "➕ העלה קובץ CDM (.wvd)",
   "UPLOAD_THUMBNAIL": "📤 העלה תמונה ממוזערת",
   "USER": "👤 משתמש",
