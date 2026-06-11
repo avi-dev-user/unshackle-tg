@@ -292,6 +292,7 @@
   "CAP_PORTRAIT": "לאורך",
   "CAP_AUDIO": "אודיו",
   "CAP_SUBTITLES_CAP": "כתוביות",
+  "CONTENT_NOT_IN_YOUR_PLAN": "🚫 הכותר הזה לא זמין בחשבון שלך - הוא לא נכלל במנוי/חבילה שלך.",
   "TRY_AGAIN": "🔁 נסה שוב",
   "CONFIRM_CANCEL_Q": "לבטל את ההורדה?",
   "YES_CANCEL": "✖️ כן, בטל",

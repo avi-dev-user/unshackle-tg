@@ -14,6 +14,11 @@ def _friendly(err: str, lang="en") -> str:
     if any(k in e for k in ("available in your country", "not available in your", "available in your region",
                             "geo-block", "geoblock", "blocked in your", "kaltura manifest", "could not obtain")):
         return tr("THIS_CONTENT_IS_BLOCKED", lang)
+    # access/entitlement: the account simply isn't subscribed to this title (e.g. Cellcom NotEntitled).
+    # A distinct, honest message - not a generic "error, try again" that hides the real reason.
+    if any(k in e for k in ("not entitled", "notentitled", "no playable sources", "not subscribed",
+                            "subscription", "entitlement")):
+        return tr("CONTENT_NOT_IN_YOUR_PLAN", lang)
     if any(k in e for k in ("sign in to confirm", "not a bot", "--cookies", "cookies-from-browser",
                             "login required", "authenticat", "needs auth")):
         return tr("THIS_SERVICE_REQUIRES_LOGIN", lang)
