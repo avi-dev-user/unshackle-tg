@@ -330,5 +330,9 @@
   "REC_SAVED": "✅ הערוץ נשמר: {name}",
   "REC_DELETED": "🗑️ הערוץ נמחק: {name}",
   "REC_PROBING": "בודק את איכות השידור...",
-  "REC_NO_SPACE": "אין מספיק מקום בדיסק להקלטה הזו (צריך ~{need}, פנוי {free}). נסה משך קצר יותר."
+  "REC_NO_SPACE": "אין מספיק מקום בדיסק להקלטה הזו (צריך ~{need}, פנוי {free}). נסה משך קצר יותר.",
+  "SET_DEFAULT_COOKIES": "🍪 הגדר cookies ברירת מחדל",
+  "DEFAULT_COOKIES_SET": "🍪 cookies ברירת מחדל ✓ (החלף)",
+  "SEND_DEFAULT_COOKIES": "שלח קובץ cookies.txt שישמש כברירת מחדל משותפת ל-<b>{svc}</b> (כשלמשתמש אין משלו):",
+  "DEFAULT_COOKIES_SAVED": "✅ cookies ברירת מחדל נשמרו ל-{svc}."
 }

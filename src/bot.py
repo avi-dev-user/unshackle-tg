@@ -342,6 +342,11 @@ async def on_callback(cq: dict):
         _, tag, cat = data.split(":")
         set_cat_override(tag, cat)
         return await service_detail(chat, uid, mid, tag)
+    if data.startswith("dcook:") and users.is_admin(uid):     # set shared/default cookies for a service
+        svc = data.split(":", 1)[1]
+        sess(uid).update(step="await_default_cookies", acc_service=svc)
+        return await edit(chat, mid, tr("SEND_DEFAULT_COOKIES", lang).format(svc=svc),
+                          [[(tr("BACK", lang), f"svc:{svc}")]])
     if data.startswith("si:"):
         return await service_detail(chat, uid, mid, data.split(":", 1)[1])
     if data.startswith("cat:"):
@@ -533,7 +538,7 @@ async def on_message(msg: dict):
         return await recordings.channel_edit(chat, uid, m["result"]["message_id"], name)
 
     # cookies upload
-    if "document" in msg and s.get("step") in ("await_cookies", "await_wvd"):
+    if "document" in msg and s.get("step") in ("await_cookies", "await_wvd", "await_default_cookies"):
         step = s["step"]
         f = await call("getFile", file_id=msg["document"]["file_id"])
         path = f["result"]["file_path"]
@@ -542,6 +547,12 @@ async def on_message(msg: dict):
                 blob = await r.read()                # bytes (wvd is binary; cookies decode below)
         s["step"] = None
         try:
+            if step == "await_default_cookies" and users.is_admin(uid):
+                svc = s.get("acc_service")
+                auth.set_default_cookies(svc, blob.decode("utf-8", "replace"))
+                await send(chat, tr("DEFAULT_COOKIES_SAVED", lang).format(svc=svc))
+                m = await send(chat, "⏳...")
+                return await service_detail(chat, uid, m["result"]["message_id"], svc)
             if step == "await_wvd":
                 fname = (msg["document"].get("file_name") or "").lower()
                 ext = ".prd" if fname.endswith(".prd") else ".wvd"

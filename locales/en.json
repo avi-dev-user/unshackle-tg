@@ -330,5 +330,9 @@
   "REC_SAVED": "✅ Channel saved: {name}",
   "REC_DELETED": "🗑️ Channel deleted: {name}",
   "REC_PROBING": "Checking the stream quality...",
-  "REC_NO_SPACE": "Not enough disk space for this recording (need ~{need}, free {free}). Try a shorter duration."
+  "REC_NO_SPACE": "Not enough disk space for this recording (need ~{need}, free {free}). Try a shorter duration.",
+  "SET_DEFAULT_COOKIES": "🍪 Set default cookies",
+  "DEFAULT_COOKIES_SET": "🍪 Default cookies ✓ (replace)",
+  "SEND_DEFAULT_COOKIES": "Send a cookies.txt to use as the shared default for <b>{svc}</b> (used when a user has none of their own):",
+  "DEFAULT_COOKIES_SAVED": "✅ Default cookies saved for {svc}."
 }
