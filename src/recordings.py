@@ -254,6 +254,34 @@ async def channel(chat: int, uid: int, mid: int, name: str):
     await edit(chat, mid, f"📡 <b>{html.escape(name)}</b>", rows)
 
 
+def update_field(name: str, field: str, value: str) -> None:
+    chans = load()
+    if name in chans:
+        if not isinstance(chans[name], dict):
+            chans[name] = {"url": chans[name], "key": ""}
+        chans[name][field] = value
+        save(chans)
+
+
+async def channel_edit(chat: int, uid: int, mid: int, name: str):
+    """Show the channel's current details and let the admin pick which field to change."""
+    lang = users.lang(uid)
+    ch = load().get(name)
+    if not ch:
+        return await menu(chat, uid, mid)
+    if not isinstance(ch, dict):
+        ch = {"url": ch, "key": ""}
+    key = ch.get("key") or ""
+    keytxt = (key[:8] + "…") if len(key) > 8 else (key or "—")
+    body = (f"✏️ <b>{html.escape(name)}</b>\n"
+            f"🔗 <code>{html.escape((ch.get('url') or '')[:160])}</code>\n"
+            f"🔑 <code>{html.escape(keytxt)}</code>")
+    rows = [[(tr("REC_EDIT_URL", lang), f"rec:eurl:{name}")],
+            [(tr("REC_EDIT_KEY", lang), f"rec:ekey:{name}")],
+            [(tr("REC_BACK", lang), f"rec:ch:{name}")]]
+    await edit(chat, mid, body, rows)
+
+
 async def ask_duration(chat: int, uid: int, mid: int, name: str):
     lang = users.lang(uid)
     rows = [[(lbl, f"rec:dur:{name}:{secs}")] for lbl, secs in DURATIONS]

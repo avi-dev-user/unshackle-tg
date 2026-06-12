@@ -265,7 +265,7 @@
   "VIDEO": "🎬 וידאו",
   "VIDEO_2": "וידאו 🎬",
   "VIDEO_FILE": "📤 וידאו/קובץ",
-  "WELCOME_WHAT_WOULD_YOU": "<b>ברוך הבא 👋</b>\nמה תרצה לעשות?",
+  "WELCOME_WHAT_WOULD_YOU": "<b>ברוך הבא{name} 👋</b>\nמה תרצה לעשות?",
   "WHICH_ACCOUNT_SHOULD_USE": "באיזה חשבון להשתמש?",
   "WHICH_CDM_FILE_SHOULD": "באיזה קובץ CDM להשתמש?",
   "WHOLE_SEASON": "⬇️ כל העונה",
@@ -320,7 +320,13 @@
   "REC_IN_PROGRESS": "הקלטה פעילה: {name}",
   "REC_ADD_NAME": "שלח שם לערוץ:",
   "REC_ADD_URL": "שלח את כתובת ה-manifest החי:",
-  "REC_ADD_KEY": "שלח מפתח CENC (hex), או שלח <code>-</code> אם אין:",
+  "REC_ADD_KEY": "שלח מפתח CENC (hex) אם הערוץ מוצפן, או לחץ דלג:",
+  "REC_SKIP_KEY": "⏭️ דלג (אין מפתח)",
+  "REC_EDIT_URL": "🔗 ערוך URL",
+  "REC_EDIT_KEY": "🔑 ערוך מפתח",
+  "REC_NEW_URL": "שלח URL חדש של ה-manifest החי:",
+  "REC_NEW_KEY": "שלח מפתח CENC חדש (hex), או לחץ דלג כדי לנקות:",
+  "REC_UPDATED": "✅ עודכן",
   "REC_SAVED": "✅ הערוץ נשמר: {name}",
   "REC_DELETED": "🗑️ הערוץ נמחק: {name}"
 }

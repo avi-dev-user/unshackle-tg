@@ -265,7 +265,7 @@
   "VIDEO": "🎬 Video",
   "VIDEO_2": "Video 🎬",
   "VIDEO_FILE": "📤 Video/file",
-  "WELCOME_WHAT_WOULD_YOU": "<b>Welcome 👋</b>\nWhat would you like to do?",
+  "WELCOME_WHAT_WOULD_YOU": "<b>Welcome{name} 👋</b>\nWhat would you like to do?",
   "WHICH_ACCOUNT_SHOULD_USE": "Which account should I use?",
   "WHICH_CDM_FILE_SHOULD": "Which CDM file should I use?",
   "WHOLE_SEASON": "⬇️ Whole season",
@@ -320,7 +320,13 @@
   "REC_IN_PROGRESS": "Recording in progress: {name}",
   "REC_ADD_NAME": "Send a name for the channel:",
   "REC_ADD_URL": "Send the live manifest URL:",
-  "REC_ADD_KEY": "Send the CENC key (hex), or send <code>-</code> if none:",
+  "REC_ADD_KEY": "Send the CENC key (hex) if the channel is encrypted, or tap Skip:",
+  "REC_SKIP_KEY": "⏭️ Skip (no key)",
+  "REC_EDIT_URL": "🔗 Edit URL",
+  "REC_EDIT_KEY": "🔑 Edit key",
+  "REC_NEW_URL": "Send the new live manifest URL:",
+  "REC_NEW_KEY": "Send the new CENC key (hex), or tap Skip to clear it:",
+  "REC_UPDATED": "✅ Updated",
   "REC_SAVED": "✅ Channel saved: {name}",
   "REC_DELETED": "🗑️ Channel deleted: {name}"
 }

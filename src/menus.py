@@ -73,7 +73,9 @@ async def main_menu(chat: int, uid: int, mid: int = None):
         rows.append([(tr("SERVICES", lang), "m:svc"), (tr("USERS", lang), "m:users")])
         rows.append([(tr("LIVE_RECORDING", lang), "m:rec")])
     rows.append([(tr("LANGUAGE", lang), "m:lang")])
-    text = tr("WELCOME_WHAT_WOULD_YOU", lang)
+    u = users.get(uid) or {}
+    first = (u.get("name") or "").strip().split()[0] if u.get("name") else ""
+    text = tr("WELCOME_WHAT_WOULD_YOU", lang).format(name=(f" {html.escape(first)}" if first else ""))
     if mid:
         await edit(chat, mid, text, rows)
     else:
