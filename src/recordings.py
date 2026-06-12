@@ -10,6 +10,7 @@ import asyncio
 import html
 import json
 import os
+import re
 import secrets
 import shutil
 import time
@@ -26,7 +27,41 @@ REC_URL_BASE = os.environ.get("REC_URL_BASE", "https://rec.avidev.net").rstrip("
 REC_PROXY = os.environ.get("REC_PROXY", "http://127.0.0.1:8889")  # IL proxy for the live edge
 TG_LIMIT = 2 * 1024 * 1024 * 1024                                 # send via Telegram below this
 DURATIONS = [("30m", 1800), ("1h", 3600), ("90m", 5400), ("2h", 7200), ("3h", 10800)]
-active = {}                                                       # uid -> running recording label
+DEFAULT_BPS = 20_000_000 // 8                                     # ~20 Mbps fallback (4K-safe) bytes/s
+active = {}                                                       # uid -> running recording state
+
+
+def _fmt_size(n: float) -> str:
+    n = float(n or 0)
+    for unit in ("B", "KB", "MB"):
+        if n < 1024:
+            return f"{int(n)} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} GB"
+
+
+def _fmt_clock(secs: float) -> str:
+    s = int(max(0, secs))
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    return f"{h}:{m:02d}:{sec:02d}" if h else f"{m:02d}:{sec:02d}"
+
+
+async def _probe_bps(url: str, key: str) -> int:
+    """Estimate the stream's bytes/sec from the manifest's top video bitrate (+ audio), so the
+    duration picker can show sizes and the disk guard can size a recording. Falls back if unknown."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "curl", "-sSL", "-x", REC_PROXY, "-m", "15", url,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+            env={**os.environ})
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=20)
+        bws = [int(x) for x in re.findall(rb'bandwidth="(\d+)"', out or b"", re.I)]
+        if bws:
+            return (max(bws) + 192_000) // 8                     # top video + a typical audio track
+    except Exception:
+        pass
+    return DEFAULT_BPS
 
 
 # --------------------------------------------------------------------------
@@ -170,16 +205,38 @@ async def _deliver(chat: int, uid: int, mid: int, path: str, title: str, lang: s
                [[(tr("MENU", lang), "m:main")]])
 
 
-async def _status(chat: int, mid: int, name: str, paused: bool, lang: str) -> None:
+async def _status(chat: int, mid: int, name: str, paused: bool, lang: str,
+                  elapsed=None, total_secs=None, size=None) -> None:
     if paused:
         body = f"⏸️ {html.escape(name)}\n" + tr("REC_PAUSED", lang)
         rows = [[(tr("REC_RESUME", lang), "rec:resume")], [(tr("REC_STOP", lang), "rec:stop")]]
     else:
-        body = f"🔴 {html.escape(name)}\n⏺️ " + tr("REC_RECORDING_LIVE", lang)
+        line = tr("REC_RECORDING_LIVE", lang)
+        if elapsed is not None:                       # live progress ticker
+            line += f" · {_fmt_clock(elapsed)}"
+            if total_secs:
+                line += f" / {_fmt_clock(total_secs)}"
+            if size:
+                line += f" · {_fmt_size(size)}"
+        body = f"🔴 {html.escape(name)}\n⏺️ {line}"
         rows = [[(tr("REC_PAUSE", lang), "rec:pause")], [(tr("REC_STOP", lang), "rec:stop")]]
     try:
         await edit(chat, mid, body, rows)
     except Exception:
+        pass
+
+
+async def _tick(chat, uid, mid, name, seg, total_secs, base, t0, lang):
+    """Update the recording message every 30s with elapsed/remaining + current file size."""
+    try:
+        while True:
+            await asyncio.sleep(30)
+            st = active.get(uid) or {}
+            if st.get("paused") or st.get("stop"):
+                continue
+            sz = os.path.getsize(seg) if os.path.exists(seg) else 0
+            await _status(chat, mid, name, False, lang, base + (time.time() - t0), total_secs, sz)
+    except asyncio.CancelledError:
         pass
 
 
@@ -189,6 +246,16 @@ async def _run(chat: int, uid: int, mid: int, name: str, seconds: int):
     if not ch.get("url"):
         return await edit(chat, mid, "🔴 " + tr("REC_NO_SUCH_CHANNEL", lang), [[(tr("MENU", lang), "m:main")]])
     os.makedirs(REC_DIR, exist_ok=True)
+    # disk guard: don't start a recording that can't fit (4K is ~8GB/h on an already-full disk)
+    bps = ch.get("bps") or DEFAULT_BPS
+    est = bps * seconds
+    try:
+        free = shutil.disk_usage(REC_DIR).free
+    except OSError:
+        free = est * 2
+    if free < est * 1.15:
+        return await edit(chat, mid, "🔴 " + tr("REC_NO_SPACE", lang).format(
+            need=_fmt_size(est), free=_fmt_size(free)), [[(tr("MENU", lang), "m:main")]])
     base = os.path.join(REC_DIR, f"{_safe(name)}_{int(time.time())}")
     active[uid] = {"name": name, "paused": False, "stop": False, "proc": None}
     segments, total, idx = [], 0.0, 0
@@ -199,11 +266,15 @@ async def _run(chat: int, uid: int, mid: int, name: str, seconds: int):
                 while active[uid]["paused"] and not active[uid]["stop"]:
                     await asyncio.sleep(1)          # content during the pause is intentionally skipped
                 continue
-            await _status(chat, mid, name, False, lang)
+            await _status(chat, mid, name, False, lang, total, seconds, 0)
             seg = f"{base}_{idx}.mkv"
             idx += 1
             t0 = time.time()
-            await _segment(uid, ch["url"], ch.get("key", ""), int(seconds - total), seg)
+            ticker = asyncio.create_task(_tick(chat, uid, mid, name, seg, seconds, total, t0, lang))
+            try:
+                await _segment(uid, ch["url"], ch.get("key", ""), int(seconds - total), seg)
+            finally:
+                ticker.cancel()
             total += time.time() - t0
             if os.path.exists(seg) and os.path.getsize(seg) > 0:
                 segments.append(seg)
@@ -284,6 +355,14 @@ async def channel_edit(chat: int, uid: int, mid: int, name: str):
 
 async def ask_duration(chat: int, uid: int, mid: int, name: str):
     lang = users.lang(uid)
-    rows = [[(lbl, f"rec:dur:{name}:{secs}")] for lbl, secs in DURATIONS]
+    ch = load().get(name) or {}
+    bps = ch.get("bps")
+    if not bps:                                       # probe the stream's bitrate once, then cache it
+        await edit(chat, mid, "⏳ " + tr("REC_PROBING", lang))
+        bps = await _probe_bps(ch.get("url", ""), ch.get("key", ""))
+        if bps and bps != DEFAULT_BPS:
+            update_field(name, "bps", bps)
+    bps = bps or DEFAULT_BPS
+    rows = [[(f"{lbl} · ≈{_fmt_size(bps * secs)}", f"rec:dur:{name}:{secs}")] for lbl, secs in DURATIONS]
     rows.append([(tr("REC_BACK", lang), f"rec:ch:{name}")])
     await edit(chat, mid, tr("REC_PICK_DURATION", lang).format(name=html.escape(name)), rows)

@@ -328,5 +328,7 @@
   "REC_NEW_KEY": "Send the new CENC key (hex), or tap Skip to clear it:",
   "REC_UPDATED": "✅ Updated",
   "REC_SAVED": "✅ Channel saved: {name}",
-  "REC_DELETED": "🗑️ Channel deleted: {name}"
+  "REC_DELETED": "🗑️ Channel deleted: {name}",
+  "REC_PROBING": "Checking the stream quality...",
+  "REC_NO_SPACE": "Not enough disk space for this recording (need ~{need}, free {free}). Try a shorter duration."
 }
