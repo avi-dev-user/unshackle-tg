@@ -271,6 +271,15 @@ async def on_callback(cq: dict):
         return await recordings.menu(chat, uid, mid)
     if data.startswith("rec:") and users.is_admin(uid):
         rest = data.split(":", 1)[1]
+        if rest == "nokey":                          # finish add-channel wizard with no CENC key
+            new = sess(uid).get("rec_new") or {}
+            if new.get("name") and new.get("url"):
+                recordings.put(new["name"], new["url"], "")
+                sess(uid)["step"] = None
+                sess(uid).pop("rec_new", None)
+                await call("answerCallbackQuery", callback_query_id=cq["id"],
+                           text=tr("REC_SAVED", lang).format(name=new["name"]))
+            return await recordings.menu(chat, uid, mid)
         if rest == "pause":                          # skip live content until resumed
             recordings.pause(uid)
             return await call("answerCallbackQuery", callback_query_id=cq["id"], text="⏸️")
@@ -294,10 +303,24 @@ async def on_callback(cq: dict):
             await call("answerCallbackQuery", callback_query_id=cq["id"],
                        text=tr("REC_DELETED", lang).format(name=name))
             return await recordings.menu(chat, uid, mid)
-        if rest.startswith("edit:"):                 # reuse the add wizard, pre-seeding the name
+        if rest.startswith("edit:"):                 # show current details + pick a field to edit
+            return await recordings.channel_edit(chat, uid, mid, rest[5:])
+        if rest.startswith("eurl:"):
             name = rest[5:]
-            sess(uid).update(step="await_rec_url", rec_new={"name": name})
-            return await edit(chat, mid, tr("REC_ADD_URL", lang), [[(tr("REC_BACK", lang), "m:rec")]])
+            sess(uid).update(step="await_rec_edit_url", edit_ch=name)
+            return await edit(chat, mid, tr("REC_NEW_URL", lang), [[(tr("REC_BACK", lang), f"rec:edit:{name}")]])
+        if rest.startswith("ekeyclear:"):            # clear the key (no encryption)
+            name = rest[10:]
+            recordings.update_field(name, "key", "")
+            sess(uid)["step"] = None
+            await call("answerCallbackQuery", callback_query_id=cq["id"], text=tr("REC_UPDATED", lang))
+            return await recordings.channel_edit(chat, uid, mid, name)
+        if rest.startswith("ekey:"):
+            name = rest[5:]
+            sess(uid).update(step="await_rec_edit_key", edit_ch=name)
+            return await edit(chat, mid, tr("REC_NEW_KEY", lang),
+                              [[(tr("REC_SKIP_KEY", lang), f"rec:ekeyclear:{name}")],
+                               [(tr("REC_BACK", lang), f"rec:edit:{name}")]])
         if rest.startswith("dur:"):
             _, name, secs = rest.split(":", 2)
             recordings.start(chat, uid, mid, name, int(secs))
@@ -485,7 +508,7 @@ async def on_message(msg: dict):
         if s["step"] == "await_rec_url":
             new["url"] = text
             s["step"] = "await_rec_key"
-            return await send(chat, tr("REC_ADD_KEY", lang))
+            return await send(chat, tr("REC_ADD_KEY", lang), [[(tr("REC_SKIP_KEY", lang), "rec:nokey")]])
         # await_rec_key
         key = "" if text == "-" else text
         recordings.put(new["name"], new["url"], key)
@@ -494,6 +517,20 @@ async def on_message(msg: dict):
         await send(chat, tr("REC_SAVED", lang).format(name=html.escape(new["name"])))
         m = await send(chat, "⏳...")
         return await recordings.menu(chat, uid, m["result"]["message_id"])
+
+    # live-recording: edit a single field (url / key) of an existing channel
+    if s.get("step") in ("await_rec_edit_url", "await_rec_edit_key") and users.is_admin(uid):
+        text = (msg.get("text") or "").strip()
+        if not text:
+            return
+        name = s.get("edit_ch")
+        field = "url" if s["step"] == "await_rec_edit_url" else "key"
+        recordings.update_field(name, field, "" if text == "-" else text)
+        s["step"] = None
+        s.pop("edit_ch", None)
+        await send(chat, tr("REC_UPDATED", lang))
+        m = await send(chat, "⏳...")
+        return await recordings.channel_edit(chat, uid, m["result"]["message_id"], name)
 
     # cookies upload
     if "document" in msg and s.get("step") in ("await_cookies", "await_wvd"):
