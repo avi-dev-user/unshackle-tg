@@ -46,6 +46,14 @@ def _admin_actor(uid) -> str:
     return f"👤 {who or '?'} <code>{uid}</code> {links}"
 
 
+def _req_ctx(uid) -> str:
+    """What the user was trying to do (service / link / title / episode), for admin debugging."""
+    s = sess(uid) or {}
+    fields = (("service", "🛠"), ("title_id", "🔗"), ("name", "🎬"), ("wanted", "📺"), ("send_as", "📦"))
+    lines = [f"{icon} {html.escape(str(s[k]))[:200]}" for k, icon in fields if s.get(k)]
+    return ("\n" + "\n".join(lines)) if lines else ""
+
+
 async def user_error(chat: int, mid: int, uid, e, back=None, allow_retry: bool = False) -> None:
     """User sees a friendly message; the admin gets the full technical detail + who.
     allow_retry: offer a one-tap 🔁 retry when the failure looks transient (rate-limit, network,
@@ -53,10 +61,11 @@ async def user_error(chat: int, mid: int, uid, e, back=None, allow_retry: bool =
     with a more specific remedy (login/CDM/geo/premium) get that action instead, not a retry."""
     lang = users.lang(uid)
     msg = str(e)
+    ctx = _req_ctx(uid)                            # service / link / title - so the admin can debug
     for admin in config.ADMIN_IDS:
         try:
             await call("sendMessage", chat_id=admin, parse_mode="HTML", disable_web_page_preview=True,
-                       text=f"⚠️ <b>User error</b>\n{_admin_actor(uid)}\n<code>{html.escape(msg[:1800])}</code>")
+                       text=f"⚠️ <b>User error</b>\n{_admin_actor(uid)}{ctx}\n<code>{html.escape(msg[:1800])}</code>")
         except Exception:
             pass
     print(f"[user_error] uid={uid}: {msg[:200]}")
@@ -89,6 +98,7 @@ async def report_error(where: str, exc: Exception, uid=None) -> None:
     tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
     head = (f"⚠️ <b>Error</b> · {html.escape(where)}"
             + (f" · user <code>{uid}</code>" if uid else "")
+            + (_req_ctx(uid) if uid else "")
             + f"\n<code>{html.escape(type(exc).__name__)}: {html.escape(str(exc)[:400])}</code>")
     chunks = [tb[i:i + 3500] for i in range(0, len(tb), 3500)] or [""]
     for admin in config.ADMIN_IDS:
