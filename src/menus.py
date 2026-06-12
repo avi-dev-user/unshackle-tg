@@ -640,5 +640,11 @@ async def service_detail(chat: int, uid: int, mid: int, tag: str):
     cat_names = {"il": tr("REGIONAL", lang), "free": tr("FREE", lang), "sub": tr("SUBSCRIPTION", lang)}
     lines.append("\n" + tr("CURRENT_TAB_YOU_CAN", lang).format(cat=cat_names[cur]))
     move = [(emoji, f"scat:{tag}:{k}") for k, emoji in (("il", "🌍"), ("free", "🆓"), ("sub", "💳")) if k != cur]
-    rows = [[(tr("DOWNLOAD_FROM_HERE", lang), f"svc:{tag}")], move, [(tr("BACK", lang), f"svcg:{cur}:0")]]
+    rows = [[(tr("DOWNLOAD_FROM_HERE", lang), f"svc:{tag}")]]
+    if "cookies" in svc_auth_methods(tag):          # admin: shared cookies used when a user has none
+        has = auth.has_default_cookies(tag)
+        rows.append([((tr("DEFAULT_COOKIES_SET", lang) if has else tr("SET_DEFAULT_COOKIES", lang)),
+                      f"dcook:{tag}")])
+    rows.append(move)
+    rows.append([(tr("BACK", lang), f"svcg:{cur}:0")])
     await edit(chat, mid, "\n".join(lines), rows)

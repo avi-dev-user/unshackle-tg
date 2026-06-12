@@ -157,6 +157,10 @@ async def launch_download(chat: int, uid: int, mid: int, *, service, title_id, p
     # default-deny a forged profile (cookie files are keyed by profile -> another user's cookies)
     if profile not in ({str(uid)} | {a["profile"] for a in auth.list_accounts(uid, service)}):
         profile = str(uid)
+    # fall back to admin-provided shared cookies when the user has no account of their own for this
+    # service (e.g. YouTube catch-all downloads that otherwise hit "confirm you're not a bot")
+    if not auth.list_accounts(uid, service) and auth.has_default_cookies(service):
+        profile = auth.DEFAULT_PROFILE
     if not is_monitor:                              # remember this attempt for a one-tap retry on failure
         retry_spec[uid] = dict(service=service, title_id=title_id, profile=profile, wanted=wanted,
                                quality=quality, flags=flags, name=name, src_url=src_url,

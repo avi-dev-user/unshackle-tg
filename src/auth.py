@@ -114,6 +114,26 @@ def add_cookies(tg_id: int, service: str, cookie_text: str, label: str = None) -
     return account
 
 
+DEFAULT_PROFILE = "_default"   # shared admin-provided cookies, used when a user has none of their own
+
+
+def set_default_cookies(service: str, cookie_text: str) -> None:
+    """Admin: store shared cookies for a service (used as a fallback for users without their own).
+    Fixes e.g. YouTube 'confirm you're not a bot' on catch-all downloads."""
+    if not is_cookie_file(cookie_text):
+        raise ValueError("This doesn't look like a Netscape cookies.txt file.")
+    path = _cookie_path(service, DEFAULT_PROFILE)
+    path.write_text(cookie_text, "utf-8")
+    os.chmod(path, 0o600)
+
+
+def has_default_cookies(service: str) -> bool:
+    try:
+        return (config.COOKIES_DIR / _safe(service) / f"{DEFAULT_PROFILE}.txt").exists()
+    except ValueError:
+        return False
+
+
 def add_credential(tg_id: int, service: str, username: str, password: str, label: str = None) -> dict:
     """Save a username+password account, encrypted at rest. No cookie file is written;
     the secret lives only as a Fernet token in the index. Returns the account dict."""
