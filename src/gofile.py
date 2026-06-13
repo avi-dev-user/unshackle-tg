@@ -184,3 +184,113 @@ async def upload(path: str, progress=None, timeout: int = 7200) -> str:
     """Convenience: upload a single file and return its public download-page URL."""
     async with Session(timeout=timeout) as gf:
         return await gf.add(path, progress=progress)
+
+
+# --------------------------------------------------------------------------
+# Download FROM gofile
+# --------------------------------------------------------------------------
+# gofile gates its contents API behind a per-request website-token (generateWT) computed by
+# obfuscated JS that fingerprints the JS runtime - node/deno/browser each produce a different
+# value and only a real browser's is accepted. So we resolve the folder in a real (headless)
+# browser via Playwright - the same proven pattern the MAKO service uses - which runs that JS
+# natively and yields a valid listing. Each file's direct CDN link then downloads over HTTP with
+# the browser's accountToken cookie. This is robust to gofile rotating the obfuscation.
+
+_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+       "Chrome/126.0.0.0 Safari/537.36")
+_VIDEO_EXT = (".mp4", ".mkv", ".webm", ".mov", ".avi", ".m4v", ".ts", ".flv", ".wmv", ".mpg", ".mpeg")
+
+
+def parse_code(url: str) -> str:
+    """The folder code from a gofile URL or a bare code. gofile.io/d/<code> -> <code>."""
+    import re
+    m = re.search(r"gofile\.io/(?:d|w)/([A-Za-z0-9]+)", url or "")
+    if m:
+        return m.group(1)
+    s = (url or "").strip().strip("/")
+    return s if re.fullmatch(r"[A-Za-z0-9]+", s) else ""
+
+
+def _is_video(name: str, mimetype: str) -> bool:
+    mt = (mimetype or "").lower()
+    if mt.startswith("video/"):
+        return True
+    return any((name or "").lower().endswith(e) for e in _VIDEO_EXT)
+
+
+async def resolve(url: str, timeout_ms: int = 45000) -> dict:
+    """Resolve a gofile folder in a headless browser. Returns
+    {folder, token, files:[{name,link,size,mimetype,type,is_video}], subfolders}.
+    Raises if Playwright is unavailable or nothing could be captured."""
+    code = parse_code(url)
+    if not code:
+        raise RuntimeError("gofile: could not parse a folder code from the link")
+    try:
+        from playwright.async_api import async_playwright
+    except Exception as e:                          # framework image without playwright (tests/CI)
+        raise RuntimeError(f"gofile: Playwright not available ({e})")
+
+    captured: list = []
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True)
+        ctx = await browser.new_context(locale="en-US", user_agent=_UA)
+        page = await ctx.new_page()
+
+        async def _on_response(resp):
+            if "/contents/" in resp.url and "api.gofile.io" in resp.url:
+                try:
+                    captured.append(await resp.json())
+                except Exception:
+                    pass
+
+        page.on("response", _on_response)
+        try:
+            await page.goto(f"https://gofile.io/d/{code}", wait_until="networkidle", timeout=timeout_ms)
+            await page.wait_for_timeout(2500)         # let the file-manager XHR settle
+            cookies = await ctx.cookies()
+        finally:
+            await browser.close()
+
+    token = next((c["value"] for c in cookies if c.get("name") == "accountToken"), "")
+    files, subfolders, folder_name, seen = [], 0, code, set()
+    for doc in captured:
+        data = doc.get("data") or {}
+        folder_name = data.get("name") or folder_name
+        for child in (data.get("children") or {}).values():
+            if child.get("type") == "folder":
+                subfolders += 1
+                continue
+            link = child.get("link")
+            if not link or link in seen:
+                continue
+            seen.add(link)
+            name = child.get("name") or "file"
+            files.append({
+                "name": name, "link": link, "size": int(child.get("size") or 0),
+                "mimetype": child.get("mimetype") or "", "type": child.get("type") or "file",
+                "is_video": _is_video(name, child.get("mimetype") or ""),
+            })
+    if not captured:
+        raise RuntimeError("gofile: no contents response captured (private/expired link or page changed)")
+    return {"folder": folder_name, "token": token, "files": files, "subfolders": subfolders}
+
+
+async def fetch_file(link: str, token: str, dest: str, progress=None, timeout: int = 7200) -> None:
+    """Stream a gofile direct link to `dest`, authenticated with the accountToken cookie."""
+    headers = {"User-Agent": _UA, "Referer": "https://gofile.io/"}
+    if token:
+        headers["Cookie"] = f"accountToken={token}"
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as s:
+        async with s.get(link, headers=headers) as r:
+            r.raise_for_status()
+            total = int(r.headers.get("Content-Length") or 0)
+            done = 0
+            with open(dest, "wb") as fp:
+                async for chunk in r.content.iter_chunked(1 << 20):
+                    fp.write(chunk)
+                    done += len(chunk)
+                    if progress and total:
+                        try:
+                            await progress(done, total)
+                        except Exception:
+                            pass

@@ -349,5 +349,16 @@
   "GOFILE_UPLOAD": "☁️ העלאה ל-gofile",
   "GOFILE_SEND_FILE": "שלח לי קובץ (כל סוג) ואעלה אותו ל-gofile ואחזיר לך לינק הורדה ציבורי.",
   "UPLOAD_FAILED_GOFILE": "ההעלאה ל-gofile נכשלה: {err}",
-  "GOFILE_UPLOAD_PERM": "העלאה ל-gofile"
+  "GOFILE_UPLOAD_PERM": "העלאה ל-gofile",
+  "GOFILE_RESOLVING": "פותח את תיקיית ה-gofile (דפדפן)...",
+  "GOFILE_RESOLVE_FAILED": "לא הצלחתי לפתוח את תיקיית ה-gofile: {err}",
+  "GOFILE_EMPTY": "לא נמצאו קבצים להורדה בתיקיית ה-gofile.",
+  "GOFILE_FILES_COUNT": "{n} קבצים:",
+  "GOFILE_SUBFOLDERS_SKIPPED": "{n} תת-תיקיות דולגו (פתח אותן ישירות).",
+  "GOFILE_DOWNLOAD_ALL": "⬇️ הורד הכל ({n})",
+  "GOFILE_DL_DONE": "הסתיים: נשלחו {sent}/{total}.",
+  "GOFILE_DL_SOME_FAILED": "חלק מהקבצים לא נשלחו:",
+  "GOFILE_DL_ERR": "שגיאת הורדה",
+  "GOFILE_TOO_BIG": "גדול מדי לטלגרם",
+  "THUMBNAIL_CUSTOM": "תמונה ממוזערת מותאמת"
 }
