@@ -71,7 +71,7 @@ async def main_menu(chat: int, uid: int, mid: int = None):
     rows = grid_rows(items, 2)                     # two actions per row (tidy grid, not one column)
     if users.is_admin(uid):
         rows.append([(tr("SERVICES", lang), "m:svc"), (tr("USERS", lang), "m:users")])
-        rows.append([(tr("LIVE_RECORDING", lang), "m:rec")])
+        rows.append([(tr("LIVE_RECORDING", lang), "m:rec"), (tr("GOFILE_UPLOAD", lang), "m:gfup")])
     rows.append([(tr("SETTINGS", lang), "m:settings")])
     u = users.get(uid) or {}
     first = (u.get("name") or "").strip().split()[0] if u.get("name") else ""
