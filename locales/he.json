@@ -345,5 +345,8 @@
   "GOFILE_READY": "לינק הורדה:",
   "ASK_GOFILE": "להעלות גם ללינק הורדה ב-gofile?",
   "YES_GOFILE": "✅ כן, לינק gofile",
-  "NO_TG_ONLY": "❌ טלגרם בלבד"
+  "NO_TG_ONLY": "❌ טלגרם בלבד",
+  "GOFILE_UPLOAD": "☁️ העלאה ל-gofile",
+  "GOFILE_SEND_FILE": "שלח לי קובץ (כל סוג) ואעלה אותו ל-gofile ואחזיר לך לינק הורדה ציבורי.",
+  "UPLOAD_FAILED_GOFILE": "ההעלאה ל-gofile נכשלה: {err}"
 }

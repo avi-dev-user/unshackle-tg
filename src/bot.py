@@ -17,11 +17,11 @@ import time
 
 import aiohttp
 
-from . import admin, auth, config, monitors, recordings, state, uploader, users
+from . import admin, auth, config, gofile, monitors, recordings, state, uploader, users
 from .catalog_meta import (detect_service, load_cat_overrides, set_cat_override, svc_auth_required,
                            unwrap_url)
-from .download import (answer_gofile_ask, download_file, launch_download, redraw_progress, retry_spec,
-                       start_download, to_sel)
+from .download import (answer_gofile_ask, download_file, download_file_stream, launch_download,
+                       redraw_progress, retry_spec, start_download, to_sel)
 from .errors import report_error
 from .i18n import tr
 from .menus import (_after_account, _search_labels, account_service, accounts_menu, ask_input, cdm_menu,
@@ -94,6 +94,11 @@ async def on_callback(cq: dict):
     if data.startswith("gfask:"):                    # answer to the "upload to gofile?" prompt
         _, jid, yn = data.split(":", 2)
         return answer_gofile_ask(jid, yn == "y")
+    if data == "m:gfup":                             # admin: send any file -> get a gofile link
+        if not users.is_admin(uid):
+            return
+        sess(uid)["step"] = "await_gofile_file"
+        return await edit(chat, mid, "☁️ " + tr("GOFILE_SEND_FILE", lang), [[(tr("MENU", lang), "m:main")]])
     if data == "m:dl":
         sess(uid)["subs_mode"] = False
         return await picker(chat, uid, mid, "recent", 0)
@@ -552,6 +557,33 @@ async def on_message(msg: dict):
         return await recordings.channel_edit(chat, uid, m["result"]["message_id"], name)
 
     # cookies upload
+    if s.get("step") == "await_gofile_file" and any(k in msg for k in ("document", "video", "audio")):
+        s["step"] = None
+        if not users.is_admin(uid):                  # gate matches the menu entry
+            return
+        obj = msg.get("document") or msg.get("video") or msg.get("audio")
+        fname = obj.get("file_name") or f"file_{obj['file_id'][:10]}"
+        fname = re.sub(r'[\\/:*?"<>|]', "", fname).strip() or "file"
+        up_dir = config.STATE_DIR / "gfup"
+        up_dir.mkdir(parents=True, exist_ok=True)
+        dest = str(up_dir / fname)
+        m = await send(chat, "☁️ " + tr("UPLOADING_GOFILE", lang))
+        mid = m["result"]["message_id"]
+        try:
+            await download_file_stream(obj["file_id"], dest)
+            url = await gofile.upload(dest)
+            await edit(chat, mid, "✅ " + tr("GOFILE_READY", lang) + f"\n{url}",
+                       [[(tr("MENU", lang), "m:main")]])
+        except Exception as e:
+            await edit(chat, mid, "🔴 " + tr("UPLOAD_FAILED_GOFILE", lang).format(err=html.escape(str(e))),
+                       [[(tr("MENU", lang), "m:main")]])
+        finally:
+            try:
+                os.remove(dest)
+            except OSError:
+                pass
+        return
+
     if "document" in msg and s.get("step") in ("await_cookies", "await_wvd", "await_default_cookies"):
         step = s["step"]
         f = await call("getFile", file_id=msg["document"]["file_id"])

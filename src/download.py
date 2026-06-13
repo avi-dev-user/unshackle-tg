@@ -185,6 +185,19 @@ async def download_file(file_id: str, dest: str) -> None:
         fp.write(blob)
 
 
+async def download_file_stream(file_id: str, dest: str) -> None:
+    """Download a Telegram file to disk in chunks - safe for large files (no full-size buffer
+    in memory). The local Bot API server serves files up to its 2GB cap by path."""
+    f = await call("getFile", file_id=file_id)
+    timeout = aiohttp.ClientTimeout(total=7200)
+    async with aiohttp.ClientSession(timeout=timeout) as cs:
+        async with cs.get(f"{FILE_API}/{f['result']['file_path']}") as r:
+            r.raise_for_status()
+            with open(dest, "wb") as fp:
+                async for chunk in r.content.iter_chunked(1 << 20):
+                    fp.write(chunk)
+
+
 _resv_seq = 0   # monotonic id for synchronous concurrency-slot reservations
 
 
