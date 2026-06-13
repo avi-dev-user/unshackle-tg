@@ -348,5 +348,6 @@
   "NO_TG_ONLY": "❌ טלגרם בלבד",
   "GOFILE_UPLOAD": "☁️ העלאה ל-gofile",
   "GOFILE_SEND_FILE": "שלח לי קובץ (כל סוג) ואעלה אותו ל-gofile ואחזיר לך לינק הורדה ציבורי.",
-  "UPLOAD_FAILED_GOFILE": "ההעלאה ל-gofile נכשלה: {err}"
+  "UPLOAD_FAILED_GOFILE": "ההעלאה ל-gofile נכשלה: {err}",
+  "GOFILE_UPLOAD_PERM": "העלאה ל-gofile"
 }
