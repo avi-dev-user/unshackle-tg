@@ -122,8 +122,8 @@ async def _segment(uid: int, url: str, key: str, seconds: int, out: str) -> None
     env = dict(os.environ)
     env["http_proxy"] = env["https_proxy"] = REC_PROXY
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
-    if key:
-        cmd += ["-cenc_decryption_key", key]
+    if key:                                          # accept "KID:KEY" or just the KEY half
+        cmd += ["-cenc_decryption_key", key.split(":")[-1].strip()]
     cmd += ["-i", url, "-t", str(seconds), "-map", "0:v:0", "-map", "0:a:0", "-c", "copy", out]
     proc = await asyncio.create_subprocess_exec(*cmd, env=env,
                                                 stdout=asyncio.subprocess.DEVNULL,
