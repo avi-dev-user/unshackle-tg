@@ -481,6 +481,38 @@ async def show_dl_cover(chat: int, uid: int, mid: int):
     await edit(chat, mid, f"{_wiz_head(sess(uid), lang)}\n" + tr("THUMBNAIL", lang), rows)
 
 
+async def show_gofile_folder(chat: int, uid: int, mid: int):
+    """Render a resolved gofile folder: files, and (only if it has video) the send-as and
+    thumbnail options - just like a normal download. Then a one-tap 'download all'."""
+    from .format import _fmt_size
+    s = sess(uid)
+    lang = users.lang(uid)
+    gf = s.get("gfd") or {}
+    files = gf.get("files") or []
+    if not files:
+        return await edit(chat, mid, tr("GOFILE_EMPTY", lang), [[(tr("MENU", lang), "m:main")]])
+    has_video = any(f.get("is_video") for f in files)
+    lines = [f"☁️ <b>{html.escape(gf.get('folder') or 'gofile')}</b>",
+             tr("GOFILE_FILES_COUNT", lang).format(n=len(files))]
+    for f in files[:12]:
+        ic = "🎬" if f.get("is_video") else "📄"
+        lines.append(f"{ic} <code>{html.escape(f['name'])}</code> · {_fmt_size(f.get('size') or 0)}")
+    if len(files) > 12:
+        lines.append(f"… (+{len(files) - 12})")
+    if gf.get("subfolders"):
+        lines.append("📁 " + tr("GOFILE_SUBFOLDERS_SKIPPED", lang).format(n=gf["subfolders"]))
+    rows = []
+    if has_video:                                   # send-as + thumbnail apply only to video
+        sa = gf.get("send_as") or "video"
+        rows.append([(("✅ " if sa == "video" else "") + tr("AS_VIDEO_PLAYER_THUMBNAIL", lang), "gfd:sa:video"),
+                     (("✅ " if sa == "file" else "") + tr("AS_FILE", lang), "gfd:sa:file")])
+        cov = tr("THUMBNAIL_CUSTOM", lang) if gf.get("cover") else tr("AUTOMATIC_THUMBNAIL", lang)
+        rows.append([(f"🖼️ {cov}", "gfd:cov")])
+    rows.append([(tr("GOFILE_DOWNLOAD_ALL", lang).format(n=len(files)), "gfd:go")])
+    rows.append([(tr("MENU", lang), "m:main")])
+    await edit(chat, mid, "\n".join(lines), rows)
+
+
 async def show_sub_langs(chat: int, uid: int, mid: int):
     """Pick a subtitle language when several exist."""
     s = sess(uid)

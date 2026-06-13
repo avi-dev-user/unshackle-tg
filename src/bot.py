@@ -26,10 +26,9 @@ from .errors import report_error
 from .i18n import tr
 from .menus import (_after_account, _search_labels, account_service, accounts_menu, ask_input, cdm_menu,
                     gofile_mode_menu, language_menu, main_menu, my_downloads, pick_account_or_go, picker,
-                    settings_menu,
-                    service_detail, services_grid, show_dl_cover, show_episodes, show_quality,
-                    show_search_results, show_send_as, show_sub_langs, show_titles,
-                    show_track_types, show_tracks)
+                    settings_menu, service_detail, services_grid, show_dl_cover, show_episodes,
+                    show_gofile_folder, show_quality, show_search_results, show_send_as, show_sub_langs,
+                    show_titles, show_track_types, show_tracks)
 from .monitors_ui import (_mon_iv, _mon_last, _parse_interval, _parse_schedule, _save_monitor,
                           _schedule_label, monitor_ask_cover, monitor_ask_interval,
                           monitor_ask_sendas, monitor_ask_start, monitor_ask_tracks,
@@ -94,6 +93,20 @@ async def on_callback(cq: dict):
     if data.startswith("gfask:"):                    # answer to the "upload to gofile?" prompt
         _, jid, yn = data.split(":", 2)
         return answer_gofile_ask(jid, yn == "y")
+    if data.startswith("gfd:"):                      # gofile download folder controls
+        gf = sess(uid).get("gfd") or {}
+        if data in ("gfd:sa:video", "gfd:sa:file"):
+            gf["send_as"] = data.rsplit(":", 1)[1]
+            sess(uid)["gfd"] = gf
+            return await show_gofile_folder(chat, uid, mid)
+        if data == "gfd:cov":
+            sess(uid)["step"] = "await_gf_cover"
+            return await edit(chat, mid, tr("UPLOAD_THUMBNAIL", lang), [[(tr("BACK", lang), "gfd:back")]])
+        if data == "gfd:back":
+            return await show_gofile_folder(chat, uid, mid)
+        if data == "gfd:go":
+            return await _gofile_download_all(chat, uid, mid)
+        return
     if data == "m:gfup":                             # send any file -> get a gofile link (granted users)
         if not users.can_gofile_upload(uid):
             return
@@ -476,6 +489,92 @@ async def on_callback(cq: dict):
         return await account_service(chat, uid, mid, svc)
 
 
+async def _gofile_resolve(chat: int, uid: int, url: str):
+    """Resolve a gofile folder in a headless browser and show its files + options."""
+    lang = users.lang(uid)
+    m = await send(chat, "☁️ " + tr("GOFILE_RESOLVING", lang))
+    mid = m["result"]["message_id"]
+    try:
+        info = await gofile.resolve(url)
+    except Exception as e:
+        await report_error("gofile resolve", e, uid)
+        return await edit(chat, mid, "🔴 " + tr("GOFILE_RESOLVE_FAILED", lang).format(err=html.escape(str(e))),
+                          [[(tr("MENU", lang), "m:main")]])
+    if not info.get("files"):
+        return await edit(chat, mid, tr("GOFILE_EMPTY", lang), [[(tr("MENU", lang), "m:main")]])
+    sess(uid)["gfd"] = {"url": url, "folder": info["folder"], "token": info.get("token") or "",
+                        "files": info["files"], "subfolders": info.get("subfolders", 0),
+                        "send_as": "video", "cover": None}
+    return await show_gofile_folder(chat, uid, mid)
+
+
+async def _gofile_download_all(chat: int, uid: int, mid: int):
+    """Download every file in the resolved gofile folder and deliver each to Telegram, applying
+    the chosen send-as (video/file) and thumbnail to videos. Big files that exceed the Telegram
+    cap fall back to the original public gofile link."""
+    lang = users.lang(uid)
+    gf = sess(uid).get("gfd") or {}
+    files, token = gf.get("files") or [], gf.get("token") or ""
+    if not files:
+        return await edit(chat, mid, tr("GOFILE_EMPTY", lang), [[(tr("MENU", lang), "m:main")]])
+    up_dir = config.STATE_DIR / "gfdl" / str(uid)
+    up_dir.mkdir(parents=True, exist_ok=True)
+    total, sent, errs = len(files), 0, []
+    for idx, f in enumerate(files, 1):
+        name = f["name"]
+        safe = re.sub(r'[\\/:*?"<>|]', "", name).strip() or f"file_{idx}"
+        dest = str(up_dir / safe)
+        head = f"☁️ {html.escape(gf.get('folder') or 'gofile')}\n⬇️ {idx}/{total} <code>{html.escape(name)}</code>"
+        await edit(chat, mid, head)
+        st = {"p": -10, "t": 0.0}
+
+        async def _prog(done, tot, _h=head, _phase="⬇️"):
+            pct = int(done * 100 / tot) if tot else 0
+            now = time.time()
+            if pct >= 100 or (pct - st["p"] >= 5 and now - st["t"] >= 2.0):
+                st["p"], st["t"] = pct, now
+                try:
+                    await edit(chat, mid, f"{_h}\n{_phase} {pct}%")
+                except Exception:
+                    pass
+
+        try:
+            await gofile.fetch_file(f["link"], token, dest, progress=_prog)
+        except Exception as e:
+            errs.append(f"{name} ({tr('GOFILE_DL_ERR', lang)})")
+            print(f"gofile fetch failed ({name}): {e}")
+            continue
+        force = ("video" if gf.get("send_as", "video") == "video" else "file") if f.get("is_video") else "file"
+        st["p"], st["t"] = -10, 0.0
+
+        async def _uprog(done, tot, _h=head):
+            await _prog(done, tot, _h, "⬆️")
+
+        try:
+            await uploader.deliver(chat, dest, service="gofile", source_url=gf.get("url") or "",
+                                   lang=lang, display_title=os.path.splitext(name)[0],
+                                   force_kind=force, cover_path=gf.get("cover"), progress=_uprog)
+            sent += 1
+        except Exception as e:
+            errs.append(f"{name} ({tr('GOFILE_TOO_BIG', lang)})")
+            print(f"gofile deliver failed ({name}): {e}")
+        finally:
+            try:
+                os.remove(dest)
+            except OSError:
+                pass
+    try:
+        if up_dir.is_dir() and not any(up_dir.iterdir()):
+            up_dir.rmdir()
+    except OSError:
+        pass
+    msg = "🎉 " + tr("GOFILE_DL_DONE", lang).format(sent=sent, total=total)
+    if errs:
+        msg += "\n\n⚠️ " + tr("GOFILE_DL_SOME_FAILED", lang) + "\n" + "\n".join(f"• {html.escape(e)}" for e in errs[:10])
+        msg += "\n\n🔗 " + (gf.get("url") or "")
+    await edit(chat, mid, msg, [[(tr("MENU", lang), "m:main")]])
+
+
 async def on_message(msg: dict):
     uid = msg["from"]["id"]
     chat = msg["chat"]["id"]
@@ -658,6 +757,9 @@ async def on_message(msg: dict):
         if s.get("step") == "await_input":           # an explicit service choice wins
             s["step"] = None
             return await show_titles(chat, uid, text)
+        if "gofile.io/" in text.lower():             # gofile folder -> our Playwright resolver
+            s["step"] = None
+            return await _gofile_resolve(chat, uid, text)
         await state.services()                        # ensure regex catalog is loaded
         svc = detect_service(text)                    # known domain, else the catch-all service
         if not svc:
@@ -677,6 +779,22 @@ async def on_message(msg: dict):
         s["mon_pending"]["interval_max"] = hi
         m = await send(chat, "⏳...")
         return await monitor_ask_cover(chat, uid, m["result"]["message_id"])
+    if s.get("step") == "await_gf_cover" and msg.get("photo"):    # custom thumbnail for a gofile download
+        s["step"] = None
+        sizes = msg["photo"]
+        photo = next((p for p in reversed(sizes) if p.get("width", 9999) <= 400), sizes[0])
+        cov_dir = os.path.join(config.STATE_DIR, "covers")
+        os.makedirs(cov_dir, exist_ok=True)
+        cov_path = os.path.join(cov_dir, f"gf_{uid}_{int(time.time())}.jpg")
+        gf = s.get("gfd") or {}
+        try:
+            await download_file(photo["file_id"], cov_path)
+            gf["cover"] = cov_path
+        except Exception:
+            gf["cover"] = None
+        s["gfd"] = gf
+        m = await send(chat, tr("PHOTO_SAVED", lang) if gf.get("cover") else tr("COULD_NOT_SAVE_IT", lang))
+        return await show_gofile_folder(chat, uid, m["result"]["message_id"])
     if s.get("step") == "await_dl_cover" and msg.get("photo"):    # custom thumbnail for this download
         s["step"] = None
         sizes = msg["photo"]

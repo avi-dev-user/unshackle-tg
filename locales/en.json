@@ -349,5 +349,16 @@
   "GOFILE_UPLOAD": "☁️ Upload to gofile",
   "GOFILE_SEND_FILE": "Send me a file (any type) and I'll upload it to gofile and give you a public download link.",
   "UPLOAD_FAILED_GOFILE": "gofile upload failed: {err}",
-  "GOFILE_UPLOAD_PERM": "Upload to gofile"
+  "GOFILE_UPLOAD_PERM": "Upload to gofile",
+  "GOFILE_RESOLVING": "Opening the gofile folder (browser)...",
+  "GOFILE_RESOLVE_FAILED": "Could not open the gofile folder: {err}",
+  "GOFILE_EMPTY": "No downloadable files were found in that gofile folder.",
+  "GOFILE_FILES_COUNT": "{n} file(s):",
+  "GOFILE_SUBFOLDERS_SKIPPED": "{n} subfolder(s) skipped (open them directly).",
+  "GOFILE_DOWNLOAD_ALL": "⬇️ Download all ({n})",
+  "GOFILE_DL_DONE": "Done: sent {sent}/{total}.",
+  "GOFILE_DL_SOME_FAILED": "Some files were not sent:",
+  "GOFILE_DL_ERR": "download error",
+  "GOFILE_TOO_BIG": "too big for Telegram",
+  "THUMBNAIL_CUSTOM": "Custom thumbnail"
 }
