@@ -97,6 +97,23 @@ def svc_auth_methods(tag: str) -> list[str]:
     return state.meta(tag).get("auth_methods") or (["cookies"] if svc_needs_auth(tag) else [])
 
 
+def svc_auth_required(tag: str) -> bool:
+    """Is a connected account MANDATORY to use this service at all?
+
+    A service can ACCEPT auth (svc_needs_auth -> it lists cookies/credentials) without
+    REQUIRING it. Logging in is the whole point only for subscription services - there is
+    nothing to fetch without it. The catch-all (yt-dlp) and free / ad-supported services
+    download fine with no account; cookies are an optional fallback for gated, age-restricted
+    or bot-flagged items. So only hard-gate (send the user to connect an account before doing
+    anything) for subscription services - never for the catch-all or free/il ones. For those,
+    we try anonymously and only surface a 'add cookies' path if the download actually fails."""
+    if not svc_needs_auth(tag):
+        return False
+    if config.CATCHALL_SERVICE and tag == config.CATCHALL_SERVICE:
+        return False
+    return categorise(tag) == "sub"
+
+
 def load_cat_overrides() -> None:
     global _cat_override
     if _CAT_OVERRIDE_PATH.exists():

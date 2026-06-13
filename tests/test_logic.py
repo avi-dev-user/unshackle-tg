@@ -52,6 +52,25 @@ def test_categorise_precedence(monkeypatch):
     assert catalog_meta.categorise("OPEN") == "free"       # default
 
 
+def test_auth_required_vs_optional(monkeypatch):
+    # A service can ACCEPT auth without REQUIRING it. Only subscription services are hard-gated;
+    # the catch-all (yt-dlp) and free services download anonymously - cookies are a fallback.
+    meta = {
+        "NETFLIX": {"needs_auth": True},                 # paid -> "sub" -> mandatory
+        "YT": {"needs_auth": True},                      # catch-all that accepts cookies
+        "MAKO": {"needs_auth": True, "category": "il"},  # free-with-optional-login
+        "OPEN": {},                                      # no auth at all
+    }
+    monkeypatch.setattr(catalog_meta.state, "meta", lambda t: meta.get(t, {}))
+    monkeypatch.setattr(catalog_meta.config, "CATEGORY_SEEDS", {})
+    monkeypatch.setattr(catalog_meta.config, "FREE_SERVICES", set())
+    monkeypatch.setattr(catalog_meta.config, "CATCHALL_SERVICE", "YT")
+    assert catalog_meta.svc_auth_required("NETFLIX") is True      # subscription -> hard gate
+    assert catalog_meta.svc_auth_required("YT") is False          # catch-all -> never gated
+    assert catalog_meta.svc_auth_required("MAKO") is False        # free/il -> optional auth
+    assert catalog_meta.svc_auth_required("OPEN") is False        # no auth -> never gated
+
+
 def test_detect_service_routing(monkeypatch):
     monkeypatch.setattr(catalog_meta.config, "DOMAIN_SERVICES", {"example.com": "EX"})
     monkeypatch.setattr(catalog_meta.config, "FEED_SERVICE", "POD")

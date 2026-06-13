@@ -18,12 +18,15 @@ import time
 import aiohttp
 
 from . import admin, auth, config, monitors, recordings, state, uploader, users
-from .catalog_meta import detect_service, load_cat_overrides, set_cat_override, svc_needs_auth, unwrap_url
-from .download import download_file, launch_download, redraw_progress, retry_spec, start_download, to_sel
+from .catalog_meta import (detect_service, load_cat_overrides, set_cat_override, svc_auth_required,
+                           unwrap_url)
+from .download import (answer_gofile_ask, download_file, launch_download, redraw_progress, retry_spec,
+                       start_download, to_sel)
 from .errors import report_error
 from .i18n import tr
 from .menus import (_after_account, _search_labels, account_service, accounts_menu, ask_input, cdm_menu,
-                    language_menu, main_menu, my_downloads, pick_account_or_go, picker,
+                    gofile_mode_menu, language_menu, main_menu, my_downloads, pick_account_or_go, picker,
+                    settings_menu,
                     service_detail, services_grid, show_dl_cover, show_episodes, show_quality,
                     show_search_results, show_send_as, show_sub_langs, show_titles,
                     show_track_types, show_tracks)
@@ -76,11 +79,21 @@ async def on_callback(cq: dict):
         return
     if data in ("m:main",):
         return await main_menu(chat, uid, mid)
+    if data == "m:settings":
+        return await settings_menu(chat, uid, mid)
     if data == "m:lang":
         return await language_menu(chat, uid, mid)
     if data.startswith("lang:"):
         users.set_lang(uid, data.split(":", 1)[1])
-        return await main_menu(chat, uid, mid)
+        return await settings_menu(chat, uid, mid)
+    if data == "m:gfmode":
+        return await gofile_mode_menu(chat, uid, mid)
+    if data.startswith("gfmode:"):
+        users.set_gofile_mode(uid, data.split(":", 1)[1])
+        return await gofile_mode_menu(chat, uid, mid)
+    if data.startswith("gfask:"):                    # answer to the "upload to gofile?" prompt
+        _, jid, yn = data.split(":", 2)
+        return answer_gofile_ask(jid, yn == "y")
     if data == "m:dl":
         sess(uid)["subs_mode"] = False
         return await picker(chat, uid, mid, "recent", 0)
@@ -96,10 +109,11 @@ async def on_callback(cq: dict):
     if data.startswith("srch:"):
         tag = data.split(":", 1)[1]
         s = sess(uid)
-        # A service that requires sign-in with no connected account: don't start a search.
-        # The query would just fail at authenticate, and repeated blind logins risk the
-        # account/IP being blocked. Send the user to connect the account first.
-        if svc_needs_auth(tag) and not auth.list_accounts(uid, tag):
+        # A subscription service with no connected account: don't start a search. The query
+        # would just fail at authenticate, and repeated blind logins risk the account/IP being
+        # blocked. Send the user to connect the account first. Optional-auth services (catch-all/
+        # free) are not gated - search/list works anonymously.
+        if svc_auth_required(tag) and not auth.list_accounts(uid, tag):
             return await account_service(chat, uid, mid, tag)
         s["search_service"] = tag
         s["step"] = "await_search"

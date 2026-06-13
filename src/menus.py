@@ -6,8 +6,8 @@ import html
 import re
 
 from . import auth, state, users
-from .catalog_meta import (can_use, categorise, svc_auth_methods, svc_desc, svc_link,
-                           svc_needs_auth)
+from .catalog_meta import (can_use, categorise, svc_auth_methods, svc_auth_required, svc_desc,
+                           svc_link, svc_needs_auth)
 from .download import start_download, to_sel
 from .engine import UnshackleError
 from .errors import user_error
@@ -72,7 +72,7 @@ async def main_menu(chat: int, uid: int, mid: int = None):
     if users.is_admin(uid):
         rows.append([(tr("SERVICES", lang), "m:svc"), (tr("USERS", lang), "m:users")])
         rows.append([(tr("LIVE_RECORDING", lang), "m:rec")])
-    rows.append([(tr("LANGUAGE", lang), "m:lang")])
+    rows.append([(tr("SETTINGS", lang), "m:settings")])
     u = users.get(uid) or {}
     first = (u.get("name") or "").strip().split()[0] if u.get("name") else ""
     text = tr("WELCOME_WHAT_WOULD_YOU", lang).format(name=(f" {html.escape(first)}" if first else ""))
@@ -82,11 +82,35 @@ async def main_menu(chat: int, uid: int, mid: int = None):
         await send(chat, text, rows)
 
 
+async def settings_menu(chat: int, uid: int, mid: int):
+    """Per-user settings: UI language + the gofile download-link preference."""
+    lang = users.lang(uid)
+    cur_lang = next((name for code, name in LANGS.items() if code == lang), lang)
+    mode = users.gofile_mode(uid)
+    mode_label = tr(f"GOFILE_MODE_{mode.upper()}", lang)
+    rows = [
+        [(f"🌐 {tr('LANGUAGE', lang)}: {cur_lang}", "m:lang")],
+        [(f"☁️ {tr('GOFILE_SETTING', lang)}: {mode_label}", "m:gfmode")],
+        [(tr("MENU", lang), "m:main")],
+    ]
+    await edit(chat, mid, tr("SETTINGS", lang), rows)
+
+
+async def gofile_mode_menu(chat: int, uid: int, mid: int):
+    """Pick how the extra gofile download link is handled: ask each time / always / never."""
+    lang = users.lang(uid)
+    cur = users.gofile_mode(uid)
+    rows = [[(("✅ " if m == cur else "") + tr(f"GOFILE_MODE_{m.upper()}", lang), f"gfmode:{m}")]
+            for m in users.GOFILE_MODES]
+    rows.append([(tr("BACK", lang), "m:settings")])
+    await edit(chat, mid, f"☁️ {tr('GOFILE_SETTING_EXPLAIN', lang)}", rows)
+
+
 async def language_menu(chat: int, uid: int, mid: int):
     """Per-user UI language switch (English default)."""
     lang = users.lang(uid)
     rows = [[(("✅ " if code == lang else "") + name, f"lang:{code}")] for code, name in LANGS.items()]
-    rows.append([(tr("MENU", lang), "m:main")])
+    rows.append([(tr("BACK", lang), "m:settings")])
     await edit(chat, mid, tr("CHOOSE_YOUR_LANGUAGE", lang), rows)
 
 
@@ -218,9 +242,10 @@ async def show_titles(chat: int, uid: int, title_id: str):
     await _clear_poster(uid)                        # a fresh title: drop any previous poster
     m = await send(chat, tr("LOADING", lang))
     mid = m["result"]["message_id"]
-    # creds-required service with no connected account: send the user to connect it rather
-    # than letting list_titles fail at authenticate (and risk a blocked login).
-    if svc_needs_auth(service) and not auth.list_accounts(uid, service):
+    # subscription service with no connected account: send the user to connect it rather
+    # than letting list_titles fail at authenticate (and risk a blocked login). Optional-auth
+    # services (catch-all/free) are NOT gated - we try anonymously, cookies are a fallback.
+    if svc_auth_required(service) and not auth.list_accounts(uid, service):
         return await account_service(chat, uid, mid, service)
     try:
         titles = await engine.list_titles(service, title_id, profile=str(uid),

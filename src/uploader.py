@@ -31,6 +31,11 @@ BOT_LIMIT = 2 * GiB - 16 * 1024 * 1024       # ≤2 GiB → bot client
 PREMIUM_LIMIT = 4 * GiB - 16 * 1024 * 1024   # ≤4 GiB → Premium user client
 
 
+def max_cap() -> int:
+    """Largest single file we can send over Telegram right now (Premium client if started)."""
+    return PREMIUM_LIMIT if _premium is not None else BOT_LIMIT
+
+
 async def start() -> bool:
     """Start the uploader client(s). Bot client (≤2GB) is primary; if PREMIUM_SESSION
     is set, also start a Premium user client (≤4GB) for big files. Never raises."""

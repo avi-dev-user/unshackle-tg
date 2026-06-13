@@ -342,6 +342,27 @@ def recent(tg_id: int) -> list[str]:
     return (u or {}).get("recent") or []
 
 
+GOFILE_MODES = ("ask", "always", "never")
+
+
+def gofile_mode(tg_id: int) -> str:
+    """How this user wants the extra gofile download link handled per download:
+    'ask' (default) - prompt each time; 'always' - always upload; 'never' - never."""
+    u = _by_id(tg_id)
+    m = (u or {}).get("gofile_mode")
+    return m if m in GOFILE_MODES else "ask"
+
+
+def set_gofile_mode(tg_id: int, mode: str) -> dict | None:
+    """Set the user's gofile-link preference (their own setting, not an admin flag)."""
+    u = _by_id(tg_id)
+    if u is None or mode not in GOFILE_MODES:
+        return None
+    u["gofile_mode"] = mode
+    _save()
+    return u
+
+
 def can_monitor(tg_id: int) -> bool:
     """May this user set up auto-monitors? Admins always; others by flag."""
     if is_admin(tg_id):

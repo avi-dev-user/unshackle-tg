@@ -15,7 +15,7 @@ import secrets
 import shutil
 import time
 
-from . import config, uploader, users
+from . import config, gofile, uploader, users
 from .errors import report_error
 from .i18n import tr
 from .session import sess
@@ -205,14 +205,23 @@ async def _deliver(chat: int, uid: int, mid: int, path: str, title: str, lang: s
             return await edit(chat, mid, "🎉 " + tr("SENT", lang), [[(tr("MENU", lang), "m:main")]])
         except Exception:
             pass                                                 # fall through to a link on upload failure
-    # large (or upload failed): publish behind a random token dir + send the link
+    # large (or upload failed): prefer a gofile link (no disk on our server, no size cap)
+    gb = size / 1024 / 1024 / 1024
+    try:
+        await edit(chat, mid, "☁️ " + tr("UPLOADING_GOFILE", lang))
+        url = await gofile.upload(path)
+        os.remove(path)
+        return await edit(chat, mid, "✅ " + tr("REC_READY_LINK", lang).format(size=f"{gb:.2f} GB")
+                          + f"\n\n🔗 {url}", [[(tr("MENU", lang), "m:main")]])
+    except Exception:
+        pass                                                     # gofile failed: fall back to our own link
+    # fallback: publish behind a random token dir on our server + send the link
     token = secrets.token_urlsafe(18)
     dest_dir = os.path.join(REC_DIR, token)
     os.makedirs(dest_dir, exist_ok=True)
     dest = os.path.join(dest_dir, os.path.basename(path))
     shutil.move(path, dest)
     url = f"{REC_URL_BASE}/{token}/{os.path.basename(dest)}"
-    gb = size / 1024 / 1024 / 1024
     await edit(chat, mid, "✅ " + tr("REC_READY_LINK", lang).format(size=f"{gb:.2f} GB")
                + f"\n\n🔗 {url}\n\n" + tr("REC_LINK_EXPIRES", lang),
                [[(tr("MENU", lang), "m:main")]])
