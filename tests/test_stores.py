@@ -77,6 +77,19 @@ def test_added_user_permissions():
     assert users.service_allowed(uid, "X", has_drm=False) is True
 
 
+def test_gofile_mode_default_and_set():
+    u = users.add("800800", by=1, ts=0)
+    uid = u["id"]
+    assert users.gofile_mode(uid) == "ask"                  # default: prompt each download
+    assert users.gofile_mode(999999) == "ask"               # unknown user -> safe default
+    users.set_gofile_mode(uid, "always")
+    assert users.gofile_mode(uid) == "always"
+    users.set_gofile_mode(uid, "never")
+    assert users.gofile_mode(uid) == "never"
+    assert users.set_gofile_mode(uid, "bogus") is None       # invalid mode rejected
+    assert users.gofile_mode(uid) == "never"                 # unchanged after a bad set
+
+
 def test_lang_default_and_switch():
     u = users.add("800800", by=1, ts=0)
     assert users.lang(u["id"]) in ("en", "he")          # default (depends on DEFAULT_LANG env)

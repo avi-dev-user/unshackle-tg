@@ -334,5 +334,16 @@
   "SET_DEFAULT_COOKIES": "🍪 Set default cookies",
   "DEFAULT_COOKIES_SET": "🍪 Default cookies ✓ (replace)",
   "SEND_DEFAULT_COOKIES": "Send a cookies.txt to use as the shared default for <b>{svc}</b> (used when a user has none of their own):",
-  "DEFAULT_COOKIES_SAVED": "✅ Default cookies saved for {svc}."
+  "DEFAULT_COOKIES_SAVED": "✅ Default cookies saved for {svc}.",
+  "SETTINGS": "⚙️ Settings",
+  "GOFILE_SETTING": "gofile link",
+  "GOFILE_SETTING_EXPLAIN": "Attach a public gofile download link to your downloads?",
+  "GOFILE_MODE_ASK": "Ask each time",
+  "GOFILE_MODE_ALWAYS": "Always",
+  "GOFILE_MODE_NEVER": "Never",
+  "UPLOADING_GOFILE": "Uploading to gofile",
+  "GOFILE_READY": "Download link:",
+  "ASK_GOFILE": "Also upload to a gofile download link?",
+  "YES_GOFILE": "✅ Yes, gofile link",
+  "NO_TG_ONLY": "❌ Telegram only"
 }

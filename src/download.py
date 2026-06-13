@@ -12,7 +12,7 @@ import time
 
 import aiohttp
 
-from . import auth, config, state, uploader, users
+from . import auth, config, gofile, state, uploader, users
 from .catalog_meta import can_use
 from .engine import UnshackleError
 from .errors import report_error, user_error
@@ -26,6 +26,48 @@ from .tg import FILE_API, call, edit
 # offer a one-tap "try again" without re-walking the whole wizard. In-memory only (a bot restart
 # clears it, which is fine - the user just re-navigates). Monitors are never stored here.
 retry_spec: dict[int, dict] = {}
+
+# job_id -> (Event, answer) for the "upload to gofile?" prompt in 'ask' mode. The callback
+# handler resolves it; the poll loop waits on it. In-memory only (a restart just defaults to no).
+_gfask: dict[str, asyncio.Event] = {}
+_gfask_ans: dict[str, bool] = {}
+
+
+def answer_gofile_ask(job_id: str, yes: bool) -> None:
+    """Called from the callback handler when the user taps yes/no on the gofile prompt."""
+    _gfask_ans[job_id] = yes
+    ev = _gfask.get(job_id)
+    if ev is not None:
+        ev.set()
+
+
+async def _decide_gofile(chat: int, uid: int, mid: int, job_id: str, head_name: str,
+                         lang: str, is_monitor: bool, has_big: bool) -> bool:
+    """Whether to also publish this job's files to a gofile folder link. Honours the user's
+    setting (ask/always/never). An over-cap file has no Telegram path, so it forces gofile on
+    regardless of the preference (otherwise it could not be delivered at all)."""
+    if has_big:                         # no Telegram path -> gofile is the only way; don't bother asking
+        return True
+    mode = users.gofile_mode(uid)
+    if mode == "always":
+        return True
+    if mode == "never":
+        return False
+    if is_monitor:                      # automated runs can't be prompted
+        return False
+    ev = asyncio.Event()
+    _gfask[job_id] = ev
+    _gfask_ans.pop(job_id, None)
+    rows = [[(tr("YES_GOFILE", lang), f"gfask:{job_id}:y"),
+             (tr("NO_TG_ONLY", lang), f"gfask:{job_id}:n")]]
+    await edit(chat, mid, f"🎬 {head_name}\n☁️ " + tr("ASK_GOFILE", lang), rows)
+    try:
+        await asyncio.wait_for(ev.wait(), timeout=180)
+    except asyncio.TimeoutError:
+        pass
+    _gfask.pop(job_id, None)
+    ans = _gfask_ans.pop(job_id, None)
+    return bool(ans)                    # no answer in time -> no (Telegram-only)
 
 
 # --------------------------------------------------------------------------
@@ -327,6 +369,11 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
             from urllib.parse import urlparse
             src_name = (urlparse(src_url).hostname or "").replace("www.", "") or src_url or "?"
             total = len(files)
+            # Optional extra: publish the whole job (all files) into ONE gofile folder -> one link.
+            # Honours the user's ask/always/never setting; an over-cap file forces it on (no TG path).
+            has_big = any(os.path.getsize(f) > uploader.max_cap() for f in files if os.path.exists(f))
+            want_gf = await _decide_gofile(chat, uid, mid, job_id, head_name, lang, is_monitor, has_big)
+            gf_sess = gofile.Session() if want_gf else None
             for idx, path in enumerate(files, 1):
                 if _cancelled():                     # cancelled mid multi-file upload
                     shutil.rmtree(outdir, ignore_errors=True)
@@ -361,6 +408,31 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                     except Exception:
                         pass
 
+                size = os.path.getsize(path) if os.path.exists(path) else 0
+                too_big = size > uploader.max_cap()
+                # gofile first (it needs the file on disk - uploader.deliver deletes it). All the
+                # job's files land in gf_sess's single folder, so we surface one link at the end.
+                if gf_sess and size:
+                    try:
+                        await edit(chat, mid, f"{head}\n☁️ " + tr("UPLOADING_GOFILE", lang),
+                                   [[(tr("CANCEL_3", lang), f"cxl:{job_id}")]])
+                        await gf_sess.add(path, progress=on_up)
+                    except Exception as ge:
+                        print(f"gofile upload failed ({os.path.basename(path)}): {ge}")
+                        if too_big:                              # no Telegram path and gofile failed
+                            await gf_sess.aclose()
+                            shutil.rmtree(outdir, ignore_errors=True)
+                            await user_error(chat, mid, uid,
+                                             f"file too large for Telegram and gofile upload failed: {ge}",
+                                             allow_retry=not is_monitor)
+                            return
+                if too_big:                                      # delivered via the gofile link only
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+                    continue
+
                 try:
                     await uploader.deliver(chat, path, service=src_name, source_url=src_url,
                                            media_url=source_media, progress=on_up, phase_cb=on_phase,
@@ -371,10 +443,15 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                                            upload_date=(dl_spec or {}).get("upload_date") or "",
                                            cover_url=(dl_spec or {}).get("cover_url") or "")
                 except Exception as e:
+                    if gf_sess:
+                        await gf_sess.aclose()
                     shutil.rmtree(outdir, ignore_errors=True)
                     await user_error(chat, mid, uid, f"upload failed ({os.path.basename(path)}): {e}",
                                      allow_retry=not is_monitor)
                     return
+            gf_link = gf_sess.link if gf_sess else None
+            if gf_sess:
+                await gf_sess.aclose()
             shutil.rmtree(outdir, ignore_errors=True)   # remove the now-empty job dir
             msg = ("🎉 " + tr("SENT_FILES", lang).format(total=total)) if total > 1 \
                 else "🎉 " + tr("SENT", lang)
@@ -390,6 +467,8 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
             if skipped:
                 msg += "\n⚠️ " + tr("SUBTITLES_THAT_WEREN_AVAILABLE", lang) \
                     + ", ".join(_lang_label(s, lang) for s in skipped)
+            if gf_link:                                  # one folder link for the whole job
+                msg += "\n\n🔗 " + tr("GOFILE_READY", lang) + f"\n{gf_link}"
             await edit(chat, mid, msg, [[(tr("MENU", lang), "m:main")]])
             return
         if status == "failed":

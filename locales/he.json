@@ -334,5 +334,16 @@
   "SET_DEFAULT_COOKIES": "🍪 הגדר cookies ברירת מחדל",
   "DEFAULT_COOKIES_SET": "🍪 cookies ברירת מחדל ✓ (החלף)",
   "SEND_DEFAULT_COOKIES": "שלח קובץ cookies.txt שישמש כברירת מחדל משותפת ל-<b>{svc}</b> (כשלמשתמש אין משלו):",
-  "DEFAULT_COOKIES_SAVED": "✅ cookies ברירת מחדל נשמרו ל-{svc}."
+  "DEFAULT_COOKIES_SAVED": "✅ cookies ברירת מחדל נשמרו ל-{svc}.",
+  "SETTINGS": "⚙️ הגדרות",
+  "GOFILE_SETTING": "לינק gofile",
+  "GOFILE_SETTING_EXPLAIN": "לצרף להורדות שלך לינק הורדה ציבורי ב-gofile?",
+  "GOFILE_MODE_ASK": "לשאול כל פעם",
+  "GOFILE_MODE_ALWAYS": "תמיד",
+  "GOFILE_MODE_NEVER": "אף פעם",
+  "UPLOADING_GOFILE": "מעלה ל-gofile",
+  "GOFILE_READY": "לינק הורדה:",
+  "ASK_GOFILE": "להעלות גם ללינק הורדה ב-gofile?",
+  "YES_GOFILE": "✅ כן, לינק gofile",
+  "NO_TG_ONLY": "❌ טלגרם בלבד"
 }
