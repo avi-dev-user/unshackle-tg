@@ -94,8 +94,8 @@ async def on_callback(cq: dict):
     if data.startswith("gfask:"):                    # answer to the "upload to gofile?" prompt
         _, jid, yn = data.split(":", 2)
         return answer_gofile_ask(jid, yn == "y")
-    if data == "m:gfup":                             # admin: send any file -> get a gofile link
-        if not users.is_admin(uid):
+    if data == "m:gfup":                             # send any file -> get a gofile link (granted users)
+        if not users.can_gofile_upload(uid):
             return
         sess(uid)["step"] = "await_gofile_file"
         return await edit(chat, mid, "☁️ " + tr("GOFILE_SEND_FILE", lang), [[(tr("MENU", lang), "m:main")]])
@@ -559,7 +559,7 @@ async def on_message(msg: dict):
     # cookies upload
     if s.get("step") == "await_gofile_file" and any(k in msg for k in ("document", "video", "audio")):
         s["step"] = None
-        if not users.is_admin(uid):                  # gate matches the menu entry
+        if not users.can_gofile_upload(uid):         # gate matches the menu entry
             return
         obj = msg.get("document") or msg.get("video") or msg.get("audio")
         fname = obj.get("file_name") or f"file_{obj['file_id'][:10]}"

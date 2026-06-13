@@ -348,5 +348,6 @@
   "NO_TG_ONLY": "❌ Telegram only",
   "GOFILE_UPLOAD": "☁️ Upload to gofile",
   "GOFILE_SEND_FILE": "Send me a file (any type) and I'll upload it to gofile and give you a public download link.",
-  "UPLOAD_FAILED_GOFILE": "gofile upload failed: {err}"
+  "UPLOAD_FAILED_GOFILE": "gofile upload failed: {err}",
+  "GOFILE_UPLOAD_PERM": "Upload to gofile"
 }
