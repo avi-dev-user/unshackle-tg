@@ -228,6 +228,17 @@ def build_caption(path: str, service_name: str = "", source_url: str = "", media
         lines.append(f"\n🔗 {tr('CAP_DOWNLOADED_FROM', lang)} {src}")
         return "\n".join(lines)
 
+    # ---- generic file (image / document / archive): no video/audio, so skip the media fields
+    # (duration/dimensions/codec) that would otherwise render as 0:00 / 0x0 for e.g. a photo ----
+    if not any(_is_real_video(st) for st in info.get("streams", [])) \
+            and not any(st.get("codec_type") == "audio" for st in info.get("streams", [])):
+        title = _expand_se(display_title or os.path.splitext(os.path.basename(path))[0], lang)
+        lines = [f"<b>📄 {title}</b>", ""]
+        lines.append(f"<blockquote expandable>💾 {tr('CAP_SIZE', lang)}: "
+                     f"<code>{size / 1024 / 1024:.2f} MiB</code></blockquote>")
+        lines.append(f"\n🔗 {tr('CAP_DOWNLOADED_FROM', lang)} {src}")
+        return "\n".join(lines)
+
     # ---- video ----
     title = _expand_se(display_title or _tag(tags, "title") or os.path.splitext(os.path.basename(path))[0], lang)
     w = h = 0

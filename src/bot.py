@@ -521,6 +521,7 @@ async def _gofile_download_all(chat: int, uid: int, mid: int):
     up_dir.mkdir(parents=True, exist_ok=True)
     total, sent, errs = len(files), 0, []
     for idx, f in enumerate(files, 1):
+        up_dir.mkdir(parents=True, exist_ok=True)    # deliver() rmdir's it once empty - recreate per file
         name = f["name"]
         safe = re.sub(r'[\\/:*?"<>|]', "", name).strip() or f"file_{idx}"
         dest = str(up_dir / safe)
