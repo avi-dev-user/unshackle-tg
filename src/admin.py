@@ -93,6 +93,7 @@ async def user_perms(chat: int, uid: int, mid: int, k: str, page: int = 0):
     rows.append([(f"{chk(u.get('can_monitor'))} " + tr("AUTO_MONITOR_2", lang), f"upf:{k}:can_monitor"),
                  (tr("CONCURRENCY", lang).format(n=u.get('max_concurrent') or users.DEFAULT_CONCURRENCY), f"ucc:{k}")])
     rows.append([(f"{chk(u.get('can_gofile_upload'))} " + tr("GOFILE_UPLOAD_PERM", lang), f"upf:{k}:can_gofile_upload")])
+    rows.append([(f"{chk(u.get('can_keys_download'))} " + tr("KEYS_DOWNLOAD_PERM", lang), f"upf:{k}:can_keys_download")])
     cats = set(u.get("cats") or [])
     rows.append([(f"{chk('il' in cats)} 🌍", f"upc:{k}:il"),
                  (f"{chk('free' in cats)} 🆓", f"upc:{k}:free"),

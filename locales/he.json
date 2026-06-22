@@ -360,5 +360,11 @@
   "GOFILE_DL_SOME_FAILED": "חלק מהקבצים לא נשלחו:",
   "GOFILE_DL_ERR": "שגיאת הורדה",
   "GOFILE_TOO_BIG": "גדול מדי לטלגרם",
-  "THUMBNAIL_CUSTOM": "תמונה ממוזערת מותאמת"
+  "THUMBNAIL_CUSTOM": "תמונה ממוזערת מותאמת",
+  "KEYS_DOWNLOAD": "🔑 הורדה עם מפתחות",
+  "KEYS_DOWNLOAD_PERM": "הורדה עם מפתחות",
+  "KEYS_SEND_PROMPT": "שלח את ה-manifest (m3u8/mpd) ואת המפתחות. אפשר להדביק ביחד (URL בשורה אחת, kid:key,kid:key בשורה אחרת), או לשלוח קודם את ה-URL ואז את המפתחות.",
+  "KEYS_NOW_SEND_KEYS": "קיבלתי את ה-manifest. עכשיו שלח את המפתחות (kid:key, מופרדים בפסיק).",
+  "KEYS_PREPARING": "מכין את ההורדה...",
+  "KEYS_BAD_INPUT": "לא הצלחתי לקרוא מ-manifest URL + מפתחות מזה. שלח לינק m3u8/mpd וזוגות kid:key (כל אחד 32 hex)."
 }

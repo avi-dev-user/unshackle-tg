@@ -286,7 +286,8 @@ def set_perm_mode(k: str, mode: str) -> dict | None:
 
 
 # boolean per-user flags the admin can toggle (extensible: add 'use_default_cookies' etc.)
-_FLAGS = ("block_auth", "block_drm", "use_default_cdm", "can_monitor", "can_gofile_upload")
+_FLAGS = ("block_auth", "block_drm", "use_default_cdm", "can_monitor", "can_gofile_upload",
+          "can_keys_download")
 
 DEFAULT_CONCURRENCY = 1          # simultaneous downloads for a normal user (a whole
 #                                  season/album/podcast = ONE job = one slot)
@@ -378,6 +379,15 @@ def can_gofile_upload(tg_id: int) -> bool:
         return True
     u = _by_id(tg_id)
     return bool(u and u.get("status") == "active" and u.get("can_gofile_upload"))
+
+
+def can_keys_download(tg_id: int) -> bool:
+    """May this user download from a manifest + supplied content keys (no license server)?
+    Admins always; others by the grantable per-user flag."""
+    if is_admin(tg_id):
+        return True
+    u = _by_id(tg_id)
+    return bool(u and u.get("status") == "active" and u.get("can_keys_download"))
 
 
 def toggle_flag(k: str, flag: str) -> dict | None:
