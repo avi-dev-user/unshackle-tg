@@ -360,5 +360,11 @@
   "GOFILE_DL_SOME_FAILED": "Some files were not sent:",
   "GOFILE_DL_ERR": "download error",
   "GOFILE_TOO_BIG": "too big for Telegram",
-  "THUMBNAIL_CUSTOM": "Custom thumbnail"
+  "THUMBNAIL_CUSTOM": "Custom thumbnail",
+  "KEYS_DOWNLOAD": "🔑 Download with keys",
+  "KEYS_DOWNLOAD_PERM": "Download with keys",
+  "KEYS_SEND_PROMPT": "Send the manifest (m3u8/mpd) and the keys. You can paste them together (URL on one line, kid:key,kid:key on another), or send the URL first and the keys after.",
+  "KEYS_NOW_SEND_KEYS": "Got the manifest. Now send the keys (kid:key, comma separated).",
+  "KEYS_PREPARING": "Preparing the download...",
+  "KEYS_BAD_INPUT": "Couldn't read a manifest URL + keys from that. Send an m3u8/mpd link and kid:key pairs (each 32 hex)."
 }

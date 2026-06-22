@@ -74,6 +74,8 @@ async def main_menu(chat: int, uid: int, mid: int = None):
         rows.append([(tr("LIVE_RECORDING", lang), "m:rec")])
     if users.can_gofile_upload(uid):                # admin or a user granted the permission
         rows.append([(tr("GOFILE_UPLOAD", lang), "m:gfup")])
+    if users.can_keys_download(uid):                # manifest + supplied keys download
+        rows.append([(tr("KEYS_DOWNLOAD", lang), "m:keys")])
     rows.append([(tr("SETTINGS", lang), "m:settings")])
     u = users.get(uid) or {}
     first = (u.get("name") or "").strip().split()[0] if u.get("name") else ""
