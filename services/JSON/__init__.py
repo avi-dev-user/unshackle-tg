@@ -69,19 +69,26 @@ class JSON(Service):
 
     def get_tracks(self, title) -> Tracks:
         entry = self.titles_data.get(str(title.id), {})
-        manifest_url = entry.get("manifest_url")
-        if not manifest_url:
-            raise click.ClickException(f"No manifest_url in catalog for '{title}'.")
+        # A title may carry one manifest (manifest_url) or several (manifest_urls) - e.g. Amazon
+        # splits a feature into separate video and audio DASH manifests. Parse each and merge the
+        # tracks; warn_only skips any id collisions between manifests instead of crashing.
+        manifest_urls = entry.get("manifest_urls") or (
+            [entry["manifest_url"]] if entry.get("manifest_url") else [])
+        if not manifest_urls:
+            raise click.ClickException(f"No manifest URL in catalog for '{title}'.")
         # Pick the decryptor per title: shaka is preferred, but it SIGSEGVs on Smooth/PIFF (.ism)
         # content, so route those to mp4decrypt. An explicit catalog "decryptor" overrides. Each
         # job runs in its own process, so setting it here stays isolated to this download.
         decryptor = self.data.get("decryptor")
-        if not decryptor and ".ism" in manifest_url.lower():
+        if not decryptor and any(".ism" in u.lower() for u in manifest_urls):
             decryptor = "mp4decrypt"
         if decryptor:
             config.decryption = decryptor
         parser = PARSERS.get((entry.get("manifest_type") or "DASH").upper(), DASH)
-        tracks = parser.from_url(manifest_url, self.session).to_tracks(language=title.language)
+        tracks = Tracks()
+        for murl in manifest_urls:
+            tracks.add(parser.from_url(murl, self.session).to_tracks(language=title.language),
+                       warn_only=True)
         # Stash only THIS title's keys. Injecting the whole catalog's keys into one track makes
         # the decrypter choke (mp4decrypt/shaka get hundreds of --key args), so keep it per-title.
         self._title_keys = {
