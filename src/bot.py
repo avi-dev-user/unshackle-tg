@@ -500,35 +500,60 @@ _KEY_PAIR_RE = re.compile(r"([0-9a-fA-F]{32})\s*:\s*([0-9a-fA-F]{32})")
 _URL_RE = re.compile(r"https?://[^\s\"'<>]+")
 
 
-def _parse_manual_keys(text: str) -> tuple[str, dict, str]:
-    """Parse a pasted 'manifest + keys' blob (the community mpd+key format). Returns
-    (manifest_url, {kid: key}, name). Any line that is neither the URL nor a kid:key pair
-    is taken as the title name. KID/key are 32-hex each."""
-    text = text or ""
-    um = _URL_RE.search(text)
-    url = um.group(0) if um else ""
-    keys = {kid.lower(): key.lower() for kid, key in _KEY_PAIR_RE.findall(text)}
-    name = ""
-    for line in text.splitlines():
-        line = line.strip().strip("`")
-        if not line or line.startswith("http") or _KEY_PAIR_RE.search(line):
+def _parse_manual_titles(text: str) -> list[dict]:
+    """Parse a pasted 'manifest + keys' blob into a list of titles. Supports both the simple
+    one-title form (URL[s] + keys) and the multi-section form where each feature has a 'Name:'
+    header followed by its own manifest URL(s) and key line (the Amazon bonus-features format).
+    Each title = {name, urls: [str], keys: {kid: key}}. A title may have several manifests
+    (e.g. separate video and audio DASH). Only titles that have at least one URL are returned."""
+    titles: list[dict] = []
+    cur: dict | None = None
+    doc_name = ""
+    for raw in (text or "").splitlines():
+        line = raw.strip().strip("`")
+        if not line:
             continue
-        name = line[:120]
-        break
-    return url, keys, name
+        is_header = line.endswith(":") and not line.lower().startswith("http") and not _KEY_PAIR_RE.search(line)
+        if is_header:
+            cur = {"name": re.sub(r"[._]+", " ", line[:-1]).strip()[:120], "urls": [], "keys": {}}
+            titles.append(cur)
+            continue
+        urls = _URL_RE.findall(line)
+        pairs = _KEY_PAIR_RE.findall(line)
+        if urls or pairs:
+            if cur is None:
+                cur = {"name": "", "urls": [], "keys": {}}
+                titles.append(cur)
+            cur["urls"].extend(urls)
+            for kid, key in pairs:
+                cur["keys"][kid.lower()] = key.lower()
+        elif cur is None and not doc_name:        # a plain leading line = the document/title name
+            doc_name = line[:120]
+    for t in titles:
+        if not t["name"]:
+            t["name"] = doc_name or "Download"
+    return [t for t in titles if t["urls"]]
 
 
-async def _keys_download(chat: int, uid: int, url: str, keys: dict, name: str):
-    """Build a one-title JSON catalog from a manifest URL + content keys and run it through the
-    JSON service (downloads + decrypts from the supplied keys, no license server)."""
-    from . import catalog as _catalog
+async def _keys_download(chat: int, uid: int, titles: list[dict]):
+    """Build a JSON catalog (export-v2) from titles of {name, urls, keys} and run it through the
+    JSON service - downloads + decrypts from the supplied keys, no license server. A title with
+    several manifest URLs (e.g. split video/audio) is parsed and merged by the JSON service."""
     lang = users.lang(uid)
     m = await send(chat, "🔑 " + tr("KEYS_PREPARING", lang))
     mid = m["result"]["message_id"]
     try:
-        raw = {"titles": [{"name": name or "Download", "url": url, "keys": keys}]}
-        export = _catalog.normalize_catalog(raw, service="JSON")
-        if not export.get("titles"):
+        export = {"version": 2, "service": "JSON", "region": "IL", "titles": {}}
+        for i, t in enumerate(titles):
+            urls = t["urls"]
+            mtype = "HLS" if any(".m3u8" in u.lower() for u in urls) else "DASH"
+            export["titles"][str(i)] = {
+                "meta": {"type": "movie", "name": t["name"] or "Download", "language": "he"},
+                "manifest_urls": urls,
+                "manifest_type": mtype,
+                "tracks": {"1": {"keys": t["keys"]}},
+            }
+        if not export["titles"]:
             return await edit(chat, mid, tr("KEYS_BAD_INPUT", lang), [[(tr("MENU", lang), "m:main")]])
         cat_dir = config.STATE_DIR / "catalogs"
         cat_dir.mkdir(parents=True, exist_ok=True)
@@ -807,19 +832,24 @@ async def on_message(msg: dict):
     if s.get("step") in ("await_keys_dl", "await_keys_only") and users.can_keys_download(uid):
         if not text:
             return
-        url, keys, name = _parse_manual_keys(text)
-        if s.get("step") == "await_keys_only":       # already have the manifest, this msg = the keys
-            url = s.get("keys_url", "") or url
-            name = name or s.get("keys_name", "")
-        if url and not keys:                         # got only the manifest -> ask for the keys next
-            s.update(keys_url=url, keys_name=name, step="await_keys_only")
+        if s.get("step") == "await_keys_only":       # staged: we stored the URL(s); this msg = keys
+            keys = {kid.lower(): key.lower() for kid, key in _KEY_PAIR_RE.findall(text)}
+            if not keys:
+                return await send(chat, "🔴 " + tr("KEYS_BAD_INPUT", lang))
+            titles = [{"name": s.get("keys_name") or "Download", "urls": s.get("keys_urls", []), "keys": keys}]
+            s["step"] = None
+            s.pop("keys_urls", None)
+            s.pop("keys_name", None)
+            return await _keys_download(chat, uid, titles)
+        titles = _parse_manual_titles(text)         # one paste: URL(s) + keys, or multi-section
+        complete = [t for t in titles if t["urls"] and t["keys"]]
+        if complete:
+            s["step"] = None
+            return await _keys_download(chat, uid, complete)
+        if len(titles) == 1 and titles[0]["urls"]:  # got the manifest, no keys yet -> ask for them
+            s.update(keys_urls=titles[0]["urls"], keys_name=titles[0]["name"], step="await_keys_only")
             return await send(chat, "🔑 " + tr("KEYS_NOW_SEND_KEYS", lang))
-        if not url or not keys:
-            return await send(chat, "🔴 " + tr("KEYS_BAD_INPUT", lang))
-        s["step"] = None
-        s.pop("keys_url", None)
-        s.pop("keys_name", None)
-        return await _keys_download(chat, uid, url, keys, name)
+        return await send(chat, "🔴 " + tr("KEYS_BAD_INPUT", lang))
     # Pasted a URL
     if text.startswith("http"):
         text = unwrap_url(text)                      # unwrap Branch/app.link smart-links
