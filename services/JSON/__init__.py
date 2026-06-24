@@ -58,17 +58,37 @@ class JSON(Service):
         self._server_cdm = True
         self._server_cdm_type = "widevine"
         self._title_keys: dict[UUID, str] = {}
+        # Maps the (sanitised, >=4-char) id handed to the core back to the original catalog key,
+        # so get_tracks still finds the entry after padding. Populated by get_titles.
+        self._id_map: dict[str, str] = {}
         super().__init__(ctx)
 
     def get_titles(self):
-        items = [
-            _build_title(entry.get("meta", {}), self.display_tag, fallback_id=tid)
-            for tid, entry in self.titles_data.items()
-        ]
+        # This is the single point where every catalog title becomes an unshackle Title, and
+        # unshackle rejects any id shorter than 4 chars ("clash likely"). A catalog can reach us
+        # with a short id ("1") or none (then the key is a loop index) - from an older/external
+        # export, not just our normalizer - so enforce the >=4 invariant HERE, at the consumer,
+        # and remember the original key for get_tracks. (catalog.normalize_catalog pads new
+        # catalogs too, but this guard covers any source.)
+        items = []
+        self._id_map = {}
+        for tid, entry in self.titles_data.items():
+            meta = dict(entry.get("meta", {}))
+            raw_id = str(meta.get("id") or tid)
+            safe_id = raw_id if len(raw_id) >= 4 else raw_id.rjust(4, "0")
+            base, n = safe_id, 1
+            while safe_id in self._id_map:          # guard padding-induced collisions
+                safe_id = f"{base}-{n}"
+                n += 1
+            meta["id"] = safe_id
+            self._id_map[safe_id] = tid
+            items.append(_build_title(meta, self.display_tag, fallback_id=safe_id))
         return Series(items) if items and isinstance(items[0], Episode) else Movies(items)
 
     def get_tracks(self, title) -> Tracks:
-        entry = self.titles_data.get(str(title.id), {})
+        # title.id was padded in get_titles; map it back to the real catalog key.
+        tid = self._id_map.get(str(title.id), str(title.id))
+        entry = self.titles_data.get(tid, {})
         # A title may carry one manifest (manifest_url) or several (manifest_urls) - e.g. Amazon
         # splits a feature into separate video and audio DASH manifests. Parse each and merge the
         # tracks; warn_only skips any id collisions between manifests instead of crashing.
