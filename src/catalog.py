@@ -66,7 +66,15 @@ def normalize_catalog(raw: Any, service: str = "FREETV", region: str = "IL", lan
         manifest, mtype = _manifest_and_type(e)
         if not manifest:
             continue
+        # unshackle's Title rejects any id shorter than 4 chars ("clash likely"), and a catalog
+        # entry may carry a short id ("1") or none at all (then it falls back to the loop index
+        # "0"/"1"/...). Left-pad short ids to 4 chars so every downstream title is valid; the id
+        # is opaque (it only keys this catalog), so padding it is safe.
         tid = str(e.get("episode_id") or e.get("id") or e.get("guid") or i)
+        if len(tid) < 4:
+            tid = tid.rjust(4, "0")
+            if tid in titles:           # only de-dupe collisions introduced by the padding
+                tid = f"{tid}-{i}"
         if e.get("episode") is not None or e.get("season") is not None or e.get("series") or e.get("series_title"):
             meta = {
                 "type": "episode",
