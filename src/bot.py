@@ -828,6 +828,23 @@ async def on_message(msg: dict):
     if text == "/start" or text == "/menu":
         s.clear()
         return await main_menu(chat, uid)
+    # cookies pasted as a text message (Netscape or JSON) - same as uploading a file
+    if s.get("step") in ("await_cookies", "await_default_cookies") and text:
+        step = s["step"]
+        svc = s.get("acc_service")
+        s["step"] = None
+        try:
+            if step == "await_default_cookies" and users.is_admin(uid):
+                auth.set_default_cookies(svc, text)
+                await send(chat, tr("DEFAULT_COOKIES_SAVED", lang).format(svc=svc))
+                m = await send(chat, "⏳...")
+                return await service_detail(chat, uid, m["result"]["message_id"], svc)
+            acct = auth.add_cookies(uid, svc, text)
+            return await send(chat, tr("SAVED_ACCOUNT_FOR", lang).format(
+                name=html.escape(acct["label"]), svc=svc))
+        except ValueError as e:
+            s["step"] = step                          # keep the step so they can retry
+            return await send(chat, f"🔴 {html.escape(str(e))}")
     # manifest + supplied content keys: accept the URL and keys together, or the URL then the keys
     if s.get("step") in ("await_keys_dl", "await_keys_only") and users.can_keys_download(uid):
         if not text:
