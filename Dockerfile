@@ -18,7 +18,7 @@ RUN curl -fsSL -o /tmp/bento4.zip \
     && unzip -j /tmp/bento4.zip "*/bin/mp4decrypt" -d /usr/local/bin/ \
     && chmod +x /usr/local/bin/mp4decrypt && rm -f /tmp/bento4.zip \
     && (curl -fsSL -o /usr/local/bin/packager \
-        "https://github.com/shaka-project/shaka-packager/releases/download/v3.4.2/packager-linux-x64" \
+        "https://github.com/shaka-project/shaka-packager/releases/download/v3.7.2/packager-linux-x64" \
         && chmod +x /usr/local/bin/packager \
         && ln -sf /usr/local/bin/packager /usr/local/bin/shaka-packager || echo "shaka-packager skipped") \
     && mp4decrypt 2>/dev/null | head -1 || true
