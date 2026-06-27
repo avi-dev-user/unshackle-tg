@@ -95,10 +95,50 @@ def is_cookie_file(text: str) -> bool:
     return any(len(line.split("\t")) >= 6 for line in text.splitlines() if not line.startswith("#"))
 
 
+def json_cookies_to_netscape(text: str) -> str | None:
+    """Convert a JSON cookie export to a Netscape cookies.txt, or None if it isn't JSON cookies.
+
+    Accepts the common browser-extension formats (Cookie-Editor / EditThisCookie - a JSON array
+    of {name,value,domain,path,...}) and Playwright/Puppeteer storage state ({"cookies":[...]}).
+    Lets a user paste/upload the JSON they exported instead of hand-converting to Netscape."""
+    try:
+        data = json.loads(text)
+    except (ValueError, TypeError):
+        return None
+    if isinstance(data, dict):
+        data = data.get("cookies") or data.get("Cookies")
+    if not isinstance(data, list):
+        return None
+    lines = ["# Netscape HTTP Cookie File"]
+    for c in data:
+        if not isinstance(c, dict) or not c.get("name"):
+            continue
+        domain = str(c.get("domain") or c.get("Domain") or "").strip()
+        if not domain:
+            continue
+        host_only = c.get("hostOnly")
+        if host_only is None:
+            host_only = not domain.startswith(".")
+        if not host_only and not domain.startswith("."):
+            domain = "." + domain                       # leading dot = applies to subdomains
+        flag = "FALSE" if host_only else "TRUE"
+        path = str(c.get("path") or "/")
+        secure = "TRUE" if c.get("secure") else "FALSE"
+        raw_exp = c.get("expirationDate") or c.get("expires") or c.get("expiry") or 0
+        try:
+            expiry = max(0, int(float(raw_exp)))
+        except (ValueError, TypeError):
+            expiry = 0
+        lines.append("\t".join([domain, flag, path, secure, str(expiry),
+                                str(c["name"]), str(c.get("value", ""))]))
+    return "\n".join(lines) + "\n" if len(lines) > 1 else None
+
+
 def add_cookies(tg_id: int, service: str, cookie_text: str, label: str = None) -> dict:
     """Save a new cookie account for the user. Returns the account dict."""
+    cookie_text = json_cookies_to_netscape(cookie_text) or cookie_text   # accept JSON exports too
     if not is_cookie_file(cookie_text):
-        raise ValueError("This doesn't look like a Netscape cookies.txt file.")
+        raise ValueError("This doesn't look like a Netscape cookies.txt or a JSON cookie export.")
     profile = _next_profile(tg_id, service)
     path = _cookie_path(service, profile)
     path.write_text(cookie_text, "utf-8")
@@ -120,8 +160,9 @@ DEFAULT_PROFILE = "_default"   # shared admin-provided cookies, used when a user
 def set_default_cookies(service: str, cookie_text: str) -> None:
     """Admin: store shared cookies for a service (used as a fallback for users without their own).
     Fixes e.g. YouTube 'confirm you're not a bot' on catch-all downloads."""
+    cookie_text = json_cookies_to_netscape(cookie_text) or cookie_text   # accept JSON exports too
     if not is_cookie_file(cookie_text):
-        raise ValueError("This doesn't look like a Netscape cookies.txt file.")
+        raise ValueError("This doesn't look like a Netscape cookies.txt or a JSON cookie export.")
     path = _cookie_path(service, DEFAULT_PROFILE)
     path.write_text(cookie_text, "utf-8")
     os.chmod(path, 0o600)

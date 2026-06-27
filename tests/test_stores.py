@@ -15,6 +15,30 @@ def test_safe_accepts_tokens_rejects_traversal():
             auth._safe(bad)
 
 
+# --- auth: JSON cookie export -> Netscape conversion ---------------------------------------
+def test_json_cookies_to_netscape():
+    import json
+    arr = json.dumps([
+        {"name": "sess", "value": "abc", "domain": ".example.com", "path": "/",
+         "secure": True, "expirationDate": 1893456000.5, "hostOnly": False},
+        {"name": "csrf", "value": "xyz", "domain": "web.example.com", "path": "/app",
+         "secure": False, "hostOnly": True},
+    ])
+    out = auth.json_cookies_to_netscape(arr)
+    assert auth.is_cookie_file(out)                                  # converts to a valid cookies.txt
+    assert ".example.com\tTRUE\t/\tTRUE\t1893456000\tsess\tabc" in out   # subdomain cookie, float expiry floored
+    assert "web.example.com\tFALSE\t/app\tFALSE\t0\tcsrf\txyz" in out    # hostOnly -> FALSE flag, session -> 0
+    # Playwright/Puppeteer storage state shape
+    pw = json.dumps({"cookies": [{"name": "t", "value": "v", "domain": "x.tv", "expires": 100}]})
+    assert "x.tv\tFALSE\t/\tFALSE\t100\tt\tv" in auth.json_cookies_to_netscape(pw)
+    # not JSON cookies -> None so the caller keeps the original text / errors cleanly
+    assert auth.json_cookies_to_netscape('{"hello": 1}') is None
+    assert auth.json_cookies_to_netscape("# Netscape HTTP Cookie File\n.x.com\tTRUE\t/\tTRUE\t0\ta\tb") is None
+    # add_cookies accepts a JSON export end to end
+    acct = auth.add_cookies(5005, "SVC", arr)
+    assert auth.is_cookie_file(auth._cookie_path("SVC", acct["profile"]).read_text("utf-8"))
+
+
 # --- auth: per-user credential isolation + encryption --------------------------------------
 def test_credentials_are_per_user_and_encrypted():
     a = auth.add_credential(1001, "SVC", "alice", "secretpw")
