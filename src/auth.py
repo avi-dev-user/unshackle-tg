@@ -209,22 +209,53 @@ def add_refresh_token(tg_id: int, service: str, refresh_token: str, label: str =
     return account
 
 
+_SHARED = "_shared"  # synthetic index key for admin-provided shared/default credentials
+
+
+def set_default_credential(service: str, refresh_token: str, label: str = "Shared (default)") -> dict:
+    """Admin: store a shared refresh-token credential for a service, used as a fallback for
+    users who have no account of their own (mirror of set_default_cookies). One per service."""
+    if not refresh_token:
+        raise ValueError("A refresh token is required.")
+    enc = _fernet().encrypt(f"refresh:{refresh_token}:refresh".encode()).decode()
+    idx = _load()
+    idx.setdefault(_SHARED, {})[service] = [
+        {"label": label, "profile": DEFAULT_PROFILE, "kind": "creds", "enc": enc}
+    ]
+    _save(idx)
+    return idx[_SHARED][service][0]
+
+
+def has_default_credential(service: str) -> bool:
+    return bool(_load().get(_SHARED, {}).get(service))
+
+
+def _default_credential(service: str) -> str | None:
+    for a in _load().get(_SHARED, {}).get(service, []):
+        if a.get("kind") == "creds" and a.get("enc"):
+            return _fernet().decrypt(a["enc"].encode()).decode()
+    return None
+
+
 def get_credential(tg_id: int, service: str, profile: str) -> str | None:
-    """Decrypt and return 'user:pass' for a credentials-account, or None."""
+    """Decrypt and return 'user:pass' for a credentials-account, or None.
+    Falls back to the shared default credential when the default profile is in use."""
     for a in list_accounts(tg_id, service):
         if a.get("profile") == profile and a.get("kind") == "creds" and a.get("enc"):
             return _fernet().decrypt(a["enc"].encode()).decode()
+    if profile == DEFAULT_PROFILE:
+        return _default_credential(service)
     return None
 
 
 def first_credential(tg_id: int, service: str) -> str | None:
     """The user's 'user:pass' from their first credentials-account for a service, for read
     calls (search / list-titles / list-tracks) that run before a specific account is picked.
-    None if the user has no credentials-account (cookie-only or unauthenticated services)."""
+    Falls back to the shared default credential, else None."""
     for a in list_accounts(tg_id, service):
         if a.get("kind") == "creds" and a.get("enc"):
             return _fernet().decrypt(a["enc"].encode()).decode()
-    return None
+    return _default_credential(service)
 
 
 def list_wvd(tg_id: int) -> list[dict]:
