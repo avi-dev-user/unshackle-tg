@@ -17,7 +17,7 @@ import time
 
 import aiohttp
 
-from . import admin, auth, config, gofile, monitors, recordings, state, uploader, users
+from . import admin, auth, config, gofile, monitors, recordings, state, sting_device, uploader, users
 from .catalog_meta import (detect_service, load_cat_overrides, set_cat_override, svc_auth_required,
                            unwrap_url)
 from .download import (answer_gofile_ask, download_file, download_file_stream, launch_download,
@@ -42,6 +42,33 @@ from .tg import FILE_API, call, edit, send
 
 # reply to a message with one of these → broadcast that message (admin only)
 BCAST_TRIGGERS = {"שדר", "שדר!", "/broadcast", "broadcast", "📢"}
+
+
+async def start_tv_login(chat: int, uid: int, mid: int, svc: str) -> None:
+    """Begin a STING Android-TV device-flow login: show the user a code + URL, then poll in
+    the background and store the resulting TV refresh token (unlocks 1080p + Dolby 5.1)."""
+    lang = users.lang(uid)
+    try:
+        info = await sting_device.start()
+    except Exception as e:
+        return await edit(chat, mid, tr("TV_LOGIN_FAILED", lang).format(err=html.escape(str(e))),
+                          [[(tr("BACK", lang), f"as:{svc}")]])
+    txt = tr("TV_LOGIN_PROMPT", lang).format(url=info["verification_uri"], code=info["user_code"])
+    await edit(chat, mid, txt, [[(tr("CANCEL", lang), f"as:{svc}")]])
+    asyncio.create_task(_poll_tv_login(chat, uid, mid, svc, info))
+
+
+async def _poll_tv_login(chat: int, uid: int, mid: int, svc: str, info: dict) -> None:
+    lang = users.lang(uid)
+    try:
+        token = await sting_device.poll(info["client_id"], info["device_code"], info["interval"], info["expires_in"])
+    except Exception:
+        token = None
+    if token:
+        auth.add_refresh_token(uid, svc, token, label="TV (1080p+5.1)")
+        await edit(chat, mid, tr("TV_LOGIN_OK", lang), [[(tr("BACK", lang), f"as:{svc}")]])
+    else:
+        await edit(chat, mid, tr("TV_LOGIN_EXPIRED", lang), [[(tr("BACK", lang), f"as:{svc}")]])
 
 
 def _forward_user(msg: dict) -> dict | None:
@@ -499,6 +526,8 @@ async def on_callback(cq: dict):
         svc = data.split(":", 1)[1]
         sess(uid).update(step="await_cookies", acc_service=svc)
         return await edit(chat, mid, tr("SEND_THE_COOKIES_TXT", lang).format(svc=svc), [[(tr("BACK", lang), f"as:{svc}")]])
+    if data.startswith("astv:"):
+        return await start_tv_login(chat, uid, mid, data.split(":", 1)[1])
     if data.startswith("adel:"):
         _, svc, profile = data.split(":")
         auth.remove_account(uid, svc, profile)

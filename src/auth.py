@@ -191,6 +191,24 @@ def add_credential(tg_id: int, service: str, username: str, password: str, label
     return account
 
 
+def add_refresh_token(tg_id: int, service: str, refresh_token: str, label: str = None) -> dict:
+    """Save a refresh-token credential (from a device-flow login, e.g. STING Android-TV).
+
+    Stored as ``refresh:<token>:refresh`` so the engine's Credential parser accepts it
+    (it rejects an empty username) and the service runs its refresh-login mode via the
+    ``refresh`` extra. Encrypted at rest like any other credential."""
+    if not refresh_token:
+        raise ValueError("A refresh token is required.")
+    token = _fernet().encrypt(f"refresh:{refresh_token}:refresh".encode()).decode()
+    profile = _next_profile(tg_id, service)
+    idx = _load()
+    accounts = idx.setdefault(str(tg_id), {}).setdefault(service, [])
+    account = {"label": (label or "").strip() or "TV login", "profile": profile, "kind": "creds", "enc": token}
+    accounts.append(account)
+    _save(idx)
+    return account
+
+
 def get_credential(tg_id: int, service: str, profile: str) -> str | None:
     """Decrypt and return 'user:pass' for a credentials-account, or None."""
     for a in list_accounts(tg_id, service):
