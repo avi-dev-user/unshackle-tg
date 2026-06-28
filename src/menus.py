@@ -527,6 +527,32 @@ async def show_sub_langs(chat: int, uid: int, mid: int):
     await edit(chat, mid, f"{_wiz_head(s, lang)}\n" + tr("PICK_SUBTITLE_LANGUAGE", lang), rows)
 
 
+async def show_audio_langs(chat: int, uid: int, mid: int):
+    """Pick an audio language when several exist (only reached when there's a real choice).
+    The languages come straight from the engine's track list (s["audio_langs"])."""
+    s = sess(uid)
+    lang = users.lang(uid)
+    langs = s.get("audio_langs") or []
+    rows = grid_rows([(_lang_label(la, lang), f"al:{la}") for la in langs], 4)
+    rows.append([(tr("ALL_LANGUAGES", lang), "al:all")])
+    rows.append([(tr("BACK", lang), "tt:back")])
+    await edit(chat, mid, f"{_wiz_head(s, lang)}\n" + tr("PICK_AUDIO_LANGUAGE", lang), rows)
+
+
+async def continue_after_track_types(chat: int, uid: int, mid: int):
+    """Route onward after the track-type (and optional audio-language) selection:
+    video -> quality, subtitles-only -> maybe a subtitle language, otherwise account/go."""
+    s = sess(uid)
+    sel = set(s.get("tsel") or [])
+    if "video" in sel:                                  # video -> choose quality, then send-as
+        return await show_quality(chat, uid, mid)
+    if sel == {"subs"}:                                 # subtitles only -> maybe pick a language
+        s["s_lang"] = None
+        if len(s.get("sub_langs") or []) > 1:
+            return await show_sub_langs(chat, uid, mid)
+    return await pick_account_or_go(chat, uid, mid, "best")   # no video -> no resolution
+
+
 async def pick_account_or_go(chat: int, uid: int, mid: int, quality):
     """If the user has >1 account for the service, ask which; else proceed."""
     s = sess(uid)

@@ -111,7 +111,7 @@ def sel_label(val, lang: str = "en") -> str:
 
 
 def build_flags(uid: int, service: str, profile: str, sel, quality,
-                s_lang=None, sub_extra_lang=None, cdm=None):
+                s_lang=None, sub_extra_lang=None, cdm=None, a_lang=None):
     """Build the unshackle download flags + quality list for a track selection (any combo of
     video/audio/subs). Shared by the wizard (start_download) and the auto-monitor."""
     sel = to_sel(sel)
@@ -133,6 +133,8 @@ def build_flags(uid: int, service: str, profile: str, sel, quality,
             flags["s_lang"] = s_lang
         if sub_extra_lang:
             flags["sub_lang"] = sub_extra_lang
+    if a_lang and "audio" in sel:          # chosen audio language(s); ["all"] keeps every language
+        flags["a_lang"] = a_lang
     cred = auth.get_credential(uid, service, profile)   # user:pass account → credential
     if cred:
         flags["credential"] = cred
@@ -162,7 +164,7 @@ async def start_download(chat: int, uid: int, mid: int, profile: str):
         return await edit(chat, mid, "⏳ " + tr("YOU_RE_ALREADY_DOWNLOADING", lang).format(limit=limit), [[(tr("MY_DOWNLOADS", lang), "m:dls")],
                           [(tr("MENU", lang), "m:main")]])
     flags, q = build_flags(uid, s["service"], profile, s.get("tsel"), s.get("quality"),
-                           s.get("s_lang"), s.get("sub_extra_lang"), s.get("cdm"))
+                           s.get("s_lang"), s.get("sub_extra_lang"), s.get("cdm"), a_lang=s.get("a_lang"))
     await edit(chat, mid, "⏳ " + tr("STARTING_DOWNLOAD", lang))
     users.note_recent(uid, s["service"])           # remember for the 🕘 אחרונים tab
     # snapshot the source now (not at completion) so a new wizard mid-download can't corrupt it

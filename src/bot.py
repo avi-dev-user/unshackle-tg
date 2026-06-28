@@ -26,7 +26,8 @@ from .errors import report_error
 from .i18n import tr
 from .menus import (_after_account, _search_labels, account_service, accounts_menu, ask_input, cdm_menu,
                     gofile_mode_menu, language_menu, main_menu, my_downloads, pick_account_or_go, picker,
-                    settings_menu, service_detail, services_grid, show_dl_cover, show_episodes,
+                    continue_after_track_types, settings_menu, service_detail, services_grid,
+                    show_audio_langs, show_dl_cover, show_episodes,
                     show_gofile_folder, show_quality, show_search_results, show_send_as, show_sub_langs,
                     show_titles, show_track_types, show_tracks)
 from .monitors_ui import (_mon_iv, _mon_last, _parse_interval, _parse_schedule, _save_monitor,
@@ -417,13 +418,14 @@ async def on_callback(cq: dict):
         if not sel:
             return await show_track_types(chat, uid, mid)   # nothing checked → re-show
         sess(uid)["send_as"] = None
-        if "video" in sel:                                  # video → choose quality, then send-as
-            return await show_quality(chat, uid, mid)
-        if sel == {"subs"}:                                 # subtitles only → maybe pick a language
-            sess(uid)["s_lang"] = None
-            if len(sess(uid).get("sub_langs") or []) > 1:
-                return await show_sub_langs(chat, uid, mid)
-        return await pick_account_or_go(chat, uid, mid, "best")   # no video → no resolution
+        sess(uid)["a_lang"] = None                          # fresh audio-language choice per title
+        if "audio" in sel and len(sess(uid).get("audio_langs") or []) > 1:
+            return await show_audio_langs(chat, uid, mid)   # several audio languages → let user pick
+        return await continue_after_track_types(chat, uid, mid)
+    if data.startswith("al:"):                              # chosen audio language ("all" = keep every language)
+        choice = data.split(":", 1)[1]
+        sess(uid)["a_lang"] = ["all"] if choice == "all" else [choice]
+        return await continue_after_track_types(chat, uid, mid)
     if data == "slother":
         sess(uid).update(step="await_sublang", mode="subs")
         return await edit(chat, mid, tr("TYPE_LANGUAGE_CODE_TO", lang), [[(tr("BACK", lang), "tt:back")]])
