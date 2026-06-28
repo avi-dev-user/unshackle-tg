@@ -78,7 +78,8 @@ async def main_menu(chat: int, uid: int, mid: int = None):
         rows.append([(tr("KEYS_DOWNLOAD", lang), "m:keys")])
     rows.append([(tr("SETTINGS", lang), "m:settings")])
     u = users.get(uid) or {}
-    first = (u.get("name") or "").strip().split()[0] if u.get("name") else ""
+    name_parts = (u.get("name") or "").split()
+    first = name_parts[0] if name_parts else ""
     text = tr("WELCOME_WHAT_WOULD_YOU", lang).format(name=(f" {html.escape(first)}" if first else ""))
     if mid:
         await edit(chat, mid, text, rows)
@@ -279,7 +280,7 @@ async def show_titles(chat: int, uid: int, title_id: str):
 async def show_episodes(chat: int, uid: int, mid: int, season: int, page: int):
     s = sess(uid)
     lang = users.lang(uid)
-    all_eps = [t for t in s["titles"] if t.get("type") == "episode"]
+    all_eps = [t for t in (s.get("titles") or []) if t.get("type") == "episode"]
     total_seasons = len({t["season"] for t in all_eps})
     eps = [t for t in all_eps if t["season"] == season]
     eps.sort(key=lambda t: t["number"], reverse=True)   # newest → oldest
@@ -500,7 +501,7 @@ async def show_gofile_folder(chat: int, uid: int, mid: int):
         ic = "🎬" if f.get("is_video") else "📄"
         lines.append(f"{ic} <code>{html.escape(f['name'])}</code> · {_fmt_size(f.get('size') or 0)}")
     if len(files) > 12:
-        lines.append(f"… (+{len(files) - 12})")
+        lines.append(f"... (+{len(files) - 12})")
     if gf.get("subfolders"):
         lines.append("📁 " + tr("GOFILE_SUBFOLDERS_SKIPPED", lang).format(n=gf["subfolders"]))
     rows = []

@@ -365,7 +365,7 @@ async def channel_edit(chat: int, uid: int, mid: int, name: str):
     if not isinstance(ch, dict):
         ch = {"url": ch, "key": ""}
     key = ch.get("key") or ""
-    keytxt = (key[:8] + "…") if len(key) > 8 else (key or "—")
+    keytxt = (key[:8] + "...") if len(key) > 8 else (key or "-")
     body = (f"✏️ <b>{html.escape(name)}</b>\n"
             f"🔗 <code>{html.escape((ch.get('url') or '')[:160])}</code>\n"
             f"🔑 <code>{html.escape(keytxt)}</code>")
