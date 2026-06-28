@@ -380,5 +380,7 @@
   "KEYS_SEND_PROMPT": "שלח את ה-manifest (m3u8/mpd) ואת המפתחות. אפשר להדביק ביחד (URL בשורה אחת, kid:key,kid:key בשורה אחרת), או לשלוח קודם את ה-URL ואז את המפתחות.",
   "KEYS_NOW_SEND_KEYS": "קיבלתי את ה-manifest. עכשיו שלח את המפתחות (kid:key, מופרדים בפסיק).",
   "KEYS_PREPARING": "מכין את ההורדה...",
-  "KEYS_BAD_INPUT": "לא הצלחתי לקרוא מ-manifest URL + מפתחות מזה. שלח לינק m3u8/mpd וזוגות kid:key (כל אחד 32 hex)."
+  "KEYS_BAD_INPUT": "לא הצלחתי לקרוא מ-manifest URL + מפתחות מזה. שלח לינק m3u8/mpd וזוגות kid:key (כל אחד 32 hex).",
+  "TV_DEFAULT_CODE": "⭐ הגדר כברירת מחדל משותפת (אדמין)",
+  "TV_DEFAULT_OK": "✅ נשמר כברירת מחדל ל-STING - כל המשתמשים בלי חשבון משלהם מקבלים עכשיו 1080p + Dolby 5.1."
 }
