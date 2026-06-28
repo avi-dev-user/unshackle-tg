@@ -536,7 +536,11 @@ async def on_callback(cq: dict):
     if data.startswith("astv:"):
         return await start_tv_login(chat, uid, mid, data.split(":", 1)[1])
     if data.startswith("astvd:"):
-        return await start_tv_login(chat, uid, mid, data.split(":", 1)[1], as_default=True)
+        svc = data.split(":", 1)[1]
+        if not users.is_admin(uid):
+            return
+        sess(uid).update(step="await_default_token", acc_service=svc)
+        return await edit(chat, mid, tr("TV_DEFAULT_PASTE", lang).format(svc=svc), [[(tr("BACK", lang), f"as:{svc}")]])
     if data.startswith("adel:"):
         _, svc, profile = data.split(":")
         auth.remove_account(uid, svc, profile)
@@ -1053,6 +1057,20 @@ async def on_message(msg: dict):
         try:
             acct = auth.add_credential(uid, svc, user.strip(), pw.strip())
             return await send(chat, tr("SAVED_ACCOUNT_FOR_ENCRYPTED", lang).format(name=html.escape(acct['label']), svc=svc))
+        except ValueError as e:
+            return await send(chat, f"🔴 {html.escape(str(e))}")
+    if s.get("step") == "await_default_token" and text:   # admin pasted a refresh token -> shared default
+        svc = s.get("acc_service")
+        s["step"] = None
+        if not users.is_admin(uid):
+            return
+        try:
+            await call("deleteMessage", chat_id=chat, message_id=msg["message_id"])  # hide the secret
+        except Exception:
+            pass
+        try:
+            auth.set_default_credential(svc, text.strip(), "TV (1080p+5.1)")
+            return await send(chat, tr("TV_DEFAULT_OK", lang))
         except ValueError as e:
             return await send(chat, f"🔴 {html.escape(str(e))}")
     if s.get("step") == "await_sublang" and text:    # typed a subtitle language code
