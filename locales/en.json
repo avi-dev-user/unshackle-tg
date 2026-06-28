@@ -166,6 +166,7 @@
   "PICK_QUALITY": "Pick quality:",
   "PICK_SERVICE": "Pick a service",
   "PICK_SUBTITLE_LANGUAGE": "Pick a subtitle language:",
+  "PICK_AUDIO_LANGUAGE": "Pick an audio language:",
   "PICK_THE_FIRST_EPISODE": "Pick the first episode to download (it and onward):",
   "RANDOM": "{lo}-{hi} (random)",
   "READING_THE_CATALOG": "📥 Reading the catalog...",
