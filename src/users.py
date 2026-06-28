@@ -364,6 +364,37 @@ def set_gofile_mode(tg_id: int, mode: str) -> dict | None:
     return u
 
 
+# release-group tag the user wants appended to output filenames (scene-style "-TAG").
+_TAG_ALLOWED = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-")
+TAG_MAX_LEN = 24
+
+
+def sanitize_tag(raw: str) -> str:
+    """Keep only filename-safe tag characters and cap the length. '' means 'no tag'."""
+    return "".join(c for c in (raw or "").strip() if c in _TAG_ALLOWED)[:TAG_MAX_LEN]
+
+
+def tag_pref(tg_id: int) -> str:
+    """The user's preferred group tag ('' = use the server default from unshackle.yaml)."""
+    u = _by_id(tg_id)
+    return (u or {}).get("group_tag") or ""
+
+
+def set_tag_pref(tg_id: int, raw: str) -> str | None:
+    """Set (or clear, when sanitized to '') the user's group tag.
+    Returns the stored tag, or None for an unknown user."""
+    u = _by_id(tg_id)
+    if u is None:
+        return None
+    tag = sanitize_tag(raw)
+    if tag:
+        u["group_tag"] = tag
+    else:
+        u.pop("group_tag", None)
+    _save()
+    return tag
+
+
 def can_monitor(tg_id: int) -> bool:
     """May this user set up auto-monitors? Admins always; others by flag."""
     if is_admin(tg_id):

@@ -29,7 +29,7 @@ from .menus import (_after_account, _search_labels, account_service, accounts_me
                     continue_after_track_types, settings_menu, service_detail, services_grid,
                     show_audio_langs, show_dl_cover, show_episodes,
                     show_gofile_folder, show_quality, show_search_results, show_send_as, show_sub_langs,
-                    show_titles, show_track_types, show_tracks)
+                    show_titles, show_track_types, show_tracks, tag_menu, ask_tag)
 from .monitors_ui import (_mon_iv, _mon_last, _parse_interval, _parse_schedule, _save_monitor,
                           _schedule_label, monitor_ask_cover, monitor_ask_interval,
                           monitor_ask_sendas, monitor_ask_start, monitor_ask_tracks,
@@ -91,6 +91,13 @@ async def on_callback(cq: dict):
     if data.startswith("gfmode:"):
         users.set_gofile_mode(uid, data.split(":", 1)[1])
         return await gofile_mode_menu(chat, uid, mid)
+    if data == "m:tag":
+        return await tag_menu(chat, uid, mid)
+    if data == "tagset":
+        return await ask_tag(chat, uid, mid)
+    if data == "tagclear":
+        users.set_tag_pref(uid, "")
+        return await tag_menu(chat, uid, mid)
     if data.startswith("gfask:"):                    # answer to the "upload to gofile?" prompt
         _, jid, yn = data.split(":", 2)
         return answer_gofile_ask(jid, yn == "y")
@@ -1017,6 +1024,12 @@ async def on_message(msg: dict):
         s["sub_extra_lang"] = code
         m = await send(chat, "⏳...")
         return await pick_account_or_go(chat, uid, m["result"]["message_id"], "best")
+    if s.get("step") == "await_tag" and text:        # user typed their group tag
+        s["step"] = None
+        saved = users.set_tag_pref(uid, text)
+        msg = tr("TAG_SAVED", lang).format(tag=saved) if saved else tr("TAG_CLEARED", lang)
+        m = await send(chat, msg)
+        return await tag_menu(chat, uid, m["result"]["message_id"])
     if s.get("step") == "await_input" and text:      # non-URL input (e.g. id/search)
         s["step"] = None
         return await show_titles(chat, uid, text)
