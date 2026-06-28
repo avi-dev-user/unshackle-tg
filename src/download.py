@@ -140,6 +140,8 @@ def build_flags(uid: int, service: str, profile: str, sel, quality,
         flags["credential"] = cred
     if cdm:                                             # per-user wvd device ("" = shared default)
         flags["cdm"] = cdm
+    if utag := users.tag_pref(uid):                     # per-user release-group tag ("" = server default)
+        flags["tag"] = utag
     # Use the region proxy ONLY for the geo-gated manifest/API; download the media segments
     # directly (usually faster than routing bulk traffic through the proxy). No effect on
     # services without a proxy. Services whose segments are themselves geo-locked (e.g. MAKO's

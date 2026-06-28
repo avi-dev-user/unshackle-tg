@@ -93,12 +93,32 @@ async def settings_menu(chat: int, uid: int, mid: int):
     cur_lang = next((name for code, name in LANGS.items() if code == lang), lang)
     mode = users.gofile_mode(uid)
     mode_label = tr(f"GOFILE_MODE_{mode.upper()}", lang)
+    tag = users.tag_pref(uid)
     rows = [
         [(f"🌐 {tr('LANGUAGE', lang)}: {cur_lang}", "m:lang")],
         [(f"☁️ {tr('GOFILE_SETTING', lang)}: {mode_label}", "m:gfmode")],
+        [(f"🏷️ {tr('TAG_SETTING', lang)}: {tag or tr('TAG_NONE', lang)}", "m:tag")],
         [(tr("MENU", lang), "m:main")],
     ]
     await edit(chat, mid, tr("SETTINGS", lang), rows)
+
+
+async def tag_menu(chat: int, uid: int, mid: int):
+    """Set or clear the per-user release-group tag appended to output filenames."""
+    lang = users.lang(uid)
+    cur = users.tag_pref(uid)
+    rows = [[(tr("TAG_SET", lang), "tagset")]]
+    if cur:
+        rows.append([(tr("TAG_CLEAR", lang), "tagclear")])
+    rows.append([(tr("BACK", lang), "m:settings")])
+    await edit(chat, mid, tr("TAG_SETTING_EXPLAIN", lang).format(tag=cur or tr("TAG_NONE", lang)), rows)
+
+
+async def ask_tag(chat: int, uid: int, mid: int):
+    """Prompt the user to type their desired group tag (next text message is captured)."""
+    lang = users.lang(uid)
+    sess(uid).update(step="await_tag")
+    await edit(chat, mid, tr("TAG_SET_PROMPT", lang), [[(tr("CANCEL", lang), "m:settings")]])
 
 
 async def gofile_mode_menu(chat: int, uid: int, mid: int):
