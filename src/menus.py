@@ -695,6 +695,8 @@ async def account_service(chat: int, uid: int, mid: int, svc: str):
         rows.append([(tr("USERNAME_PASSWORD", lang), f"aaddc:{svc}")])
     if svc == "STING":  # Android-TV device-flow login -> 1080p + DD5.1 (vs 576p on the phone class)
         rows.append([(tr("TV_LOGIN_CODE", lang), f"astv:{svc}")])
+        if users.is_admin(uid):  # admin: set the shared default (used by users without their own account)
+            rows.append([(tr("TV_DEFAULT_CODE", lang), f"astvd:{svc}")])
     rows.append([(tr("BACK", lang), "m:acc")])
     how = " · ".join(m for m in ((tr("COOKIES", lang) if "cookies" in methods else ""),
                                  (tr("USERNAME_PASSWORD_2", lang) if "credentials" in methods else "")) if m) or "-"
