@@ -693,6 +693,8 @@ async def account_service(chat: int, uid: int, mid: int, svc: str):
         rows.append([(tr("COOKIES_FILE", lang), f"aadd:{svc}")])
     if "credentials" in methods:
         rows.append([(tr("USERNAME_PASSWORD", lang), f"aaddc:{svc}")])
+    if svc == "STING":  # Android-TV device-flow login -> 1080p + DD5.1 (vs 576p on the phone class)
+        rows.append([(tr("TV_LOGIN_CODE", lang), f"astv:{svc}")])
     rows.append([(tr("BACK", lang), "m:acc")])
     how = " · ".join(m for m in ((tr("COOKIES", lang) if "cookies" in methods else ""),
                                  (tr("USERNAME_PASSWORD_2", lang) if "credentials" in methods else "")) if m) or "-"
