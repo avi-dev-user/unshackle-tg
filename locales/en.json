@@ -382,5 +382,6 @@
   "KEYS_PREPARING": "Preparing the download...",
   "KEYS_BAD_INPUT": "Couldn't read a manifest URL + keys from that. Send an m3u8/mpd link and kid:key pairs (each 32 hex).",
   "TV_DEFAULT_CODE": "⭐ Set as shared default (admin)",
-  "TV_DEFAULT_OK": "✅ Saved as the shared STING default - all users without their own account now get 1080p + Dolby 5.1."
+  "TV_DEFAULT_OK": "✅ Saved as the shared STING default - all users without their own account now get 1080p + Dolby 5.1.",
+  "TV_DEFAULT_PASTE": "⭐ <b>Set shared default ({svc})</b>\nPaste the STING TV <b>refresh token</b> here. It becomes the fallback for users without their own account (1080p + Dolby 5.1). It is stored encrypted and the message is deleted."
 }
