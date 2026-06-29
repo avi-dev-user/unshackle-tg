@@ -114,6 +114,35 @@ def test_gofile_mode_default_and_set():
     assert users.gofile_mode(uid) == "never"                 # unchanged after a bad set
 
 
+def test_default_credential_resolves_only_for_default_profile():
+    # The shared default credential is returned only when the DEFAULT_PROFILE is asked for - NOT
+    # for a user's own profile id. launch_download must therefore re-resolve against DEFAULT_PROFILE
+    # after it falls back to it (a user with no account of their own), or STING gets no credential.
+    u = users.add("820820", by=1, ts=0)
+    uid = u["id"]
+    auth.set_default_credential("STING", "refresh-token-value")
+    assert auth.has_default_credential("STING") is True
+    assert auth.get_credential(uid, "STING", auth.DEFAULT_PROFILE)            # default profile -> found
+    assert auth.get_credential(uid, "STING", str(uid)) is None               # own (empty) profile -> none
+    # a user WITH their own account still gets their own credential, not the default
+    auth.add_credential(uid, "STING", "me@example.test", "pw", label="mine")
+    own = auth.get_credential(uid, "STING", str(uid))
+    assert own and own.startswith("me@example.test:")
+
+
+def test_delivery_mode_default_and_set():
+    u = users.add("810810", by=1, ts=0)
+    uid = u["id"]
+    assert users.delivery_mode(uid) == "telegram"            # default: keep uploading to Telegram
+    assert users.delivery_mode(999998) == "telegram"         # unknown user -> safe default
+    users.set_delivery_mode(uid, "link")
+    assert users.delivery_mode(uid) == "link"
+    users.set_delivery_mode(uid, "ask")
+    assert users.delivery_mode(uid) == "ask"
+    assert users.set_delivery_mode(uid, "bogus") is None      # invalid mode rejected
+    assert users.delivery_mode(uid) == "ask"                  # unchanged after a bad set
+
+
 def test_lang_default_and_switch():
     u = users.add("800800", by=1, ts=0)
     assert users.lang(u["id"]) in ("en", "he")          # default (depends on DEFAULT_LANG env)

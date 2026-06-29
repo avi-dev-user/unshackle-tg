@@ -364,6 +364,30 @@ def set_gofile_mode(tg_id: int, mode: str) -> dict | None:
     return u
 
 
+DELIVERY_MODES = ("telegram", "link", "ask")
+
+
+def delivery_mode(tg_id: int) -> str:
+    """How this user wants a finished download delivered:
+    'telegram' (default) - upload the file to Telegram; 'link' - publish it behind a
+    self-hosted, auto-expiring download link instead of uploading; 'ask' - prompt per
+    download. Distinct from gofile_mode: that adds an EXTRA third-party link alongside
+    Telegram; this chooses the primary delivery (and 'link' skips the Telegram upload)."""
+    u = _by_id(tg_id)
+    m = (u or {}).get("delivery_mode")
+    return m if m in DELIVERY_MODES else "telegram"
+
+
+def set_delivery_mode(tg_id: int, mode: str) -> dict | None:
+    """Set the user's delivery preference (their own setting, not an admin flag)."""
+    u = _by_id(tg_id)
+    if u is None or mode not in DELIVERY_MODES:
+        return None
+    u["delivery_mode"] = mode
+    _save()
+    return u
+
+
 # release-group tag the user wants appended to output filenames (scene-style "-TAG").
 _TAG_ALLOWED = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-")
 TAG_MAX_LEN = 24

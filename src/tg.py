@@ -1,5 +1,7 @@
 """Telegram Bot API transport: a thin async wrapper over the raw HTTP API plus the
 inline-keyboard helpers. Depends only on aiohttp and the bot token, so it stays a leaf."""
+import json
+
 import aiohttp
 
 from . import config
@@ -34,3 +36,19 @@ async def send(chat: int, text: str, rows=None):
 async def edit(chat: int, mid: int, text: str, rows=None):
     return await call("editMessageText", chat_id=chat, message_id=mid, text=text,
                       parse_mode="HTML", reply_markup=kb(rows or []), disable_web_page_preview=True)
+
+
+async def send_document(chat: int, filename: str, content: bytes, caption: str = "", rows=None):
+    """Send an in-memory file as a document (multipart). Used for small generated files like the
+    keys JSON - no temp file on disk needed."""
+    form = aiohttp.FormData()
+    form.add_field("chat_id", str(chat))
+    if caption:
+        form.add_field("caption", caption)
+        form.add_field("parse_mode", "HTML")
+    if rows:
+        form.add_field("reply_markup", json.dumps(kb(rows)))
+    form.add_field("document", content, filename=filename, content_type="application/octet-stream")
+    async with aiohttp.ClientSession() as s:
+        async with s.post(f"{API}/sendDocument", data=form) as r:
+            return await r.json()

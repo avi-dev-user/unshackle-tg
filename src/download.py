@@ -7,12 +7,15 @@ state, but never calls back into them. Progress and errors go out through tg/err
 import asyncio
 import html
 import os
+import re
+import secrets
 import shutil
 import time
+from urllib.parse import quote
 
 import aiohttp
 
-from . import auth, config, gofile, state, uploader, users
+from . import auth, config, gofile, keys_extract, state, uploader, users
 from .catalog_meta import can_use
 from .engine import UnshackleError
 from .errors import report_error, user_error
@@ -20,7 +23,7 @@ from .format import _fmt_eta, _fmt_size, _lang_label, _phase, _render_progress
 from .i18n import tr
 from .session import active_jobs, sess
 from .state import engine
-from .tg import FILE_API, call, edit
+from .tg import FILE_API, call, edit, send, send_document
 
 # uid -> the kwargs of the user's last interactive launch_download, so a transient failure can
 # offer a one-tap "try again" without re-walking the whole wizard. In-memory only (a bot restart
@@ -39,6 +42,65 @@ def answer_gofile_ask(job_id: str, yes: bool) -> None:
     ev = _gfask.get(job_id)
     if ev is not None:
         ev.set()
+
+
+# Self-hosted download-link delivery (an expiring link served by nginx, instead of a Telegram
+# upload). Reuses the same dir + URL base as live recordings, so the existing cleanup CronJob
+# expires these too. Same /data filesystem as the job out dir -> publishing is an instant move.
+REC_DIR = os.environ.get("REC_DIR", "/data/recordings")
+REC_URL_BASE = os.environ.get("REC_URL_BASE", "https://rec.avidev.net").rstrip("/")
+
+# job_id -> Event/answer for the "Telegram or link?" prompt in delivery 'ask' mode (see _gfask).
+_lnk: dict[str, asyncio.Event] = {}
+_lnk_ans: dict[str, bool] = {}
+
+
+def answer_link_ask(job_id: str, link: bool) -> None:
+    """Called from the callback handler when the user picks Telegram vs link for this job."""
+    _lnk_ans[job_id] = link
+    ev = _lnk.get(job_id)
+    if ev is not None:
+        ev.set()
+
+
+async def _decide_link(chat: int, uid: int, mid: int, job_id: str, head_name: str,
+                       lang: str, is_monitor: bool) -> bool:
+    """Whether to deliver this job as a self-hosted download link instead of uploading to
+    Telegram. Honours the user's delivery_mode (telegram/link/ask). 'ask' prompts per download;
+    automated monitor runs can't be prompted, so they fall back to Telegram."""
+    mode = users.delivery_mode(uid)
+    if mode == "link":
+        return True
+    if mode == "telegram" or is_monitor:
+        return False
+    ev = asyncio.Event()
+    _lnk[job_id] = ev
+    _lnk_ans.pop(job_id, None)
+    rows = [[(tr("DELIVER_TELEGRAM", lang), f"lnk:{job_id}:t"),
+             (tr("DELIVER_LINK", lang), f"lnk:{job_id}:l")]]
+    await edit(chat, mid, f"🎬 {head_name}\n📦 " + tr("ASK_DELIVERY", lang), rows)
+    try:
+        await asyncio.wait_for(ev.wait(), timeout=180)
+    except asyncio.TimeoutError:
+        pass
+    _lnk.pop(job_id, None)
+    return bool(_lnk_ans.pop(job_id, None))     # no answer in time -> Telegram (the default)
+
+
+def publish_link(files: list[str]) -> list[str]:
+    """Move the job's files into one fresh token dir under REC_DIR (nginx-served) and return
+    their public URLs. The move is same-filesystem (instant) since out and REC_DIR share /data."""
+    token = secrets.token_urlsafe(18)
+    dest_dir = os.path.join(REC_DIR, token)
+    os.makedirs(dest_dir, exist_ok=True)
+    urls = []
+    for path in files:
+        if not os.path.exists(path):
+            continue
+        name = os.path.basename(path)
+        shutil.move(path, os.path.join(dest_dir, name))
+        urls.append(f"{REC_URL_BASE}/{token}/{quote(name)}")
+    return urls
 
 
 async def _decide_gofile(chat: int, uid: int, mid: int, job_id: str, head_name: str,
@@ -89,6 +151,40 @@ def list_output_files(outdir: str) -> list[str]:
     return sorted(out, key=os.path.getmtime)
 
 
+def _chunk_lines(text: str, limit: int = 3500) -> list[str]:
+    """Split text into chunks of at most `limit` chars without breaking a line (a single
+    over-long line is emitted on its own). Keeps each Telegram message under the 4096 cap."""
+    chunks: list[str] = []
+    cur = ""
+    for line in text.split("\n"):
+        piece = (cur + "\n" + line) if cur else line
+        if len(piece) > limit and cur:
+            chunks.append(cur)
+            cur = line
+        else:
+            cur = piece
+    if cur:
+        chunks.append(cur)
+    return chunks
+
+
+async def _deliver_keys(chat: int, uid: int, mid: int, j: dict, lang: str):
+    """Deliver a keys-only job: parse the engine's export, then send the shareable text block(s)
+    plus a JSON file ({title: {manifest, keys}}). No media was downloaded."""
+    entries = keys_extract.parse_export(j.get("keys_export") or {})
+    if not entries:
+        return await edit(chat, mid, "🔑 " + tr("KEYS_NONE_FOUND", lang),
+                          [[(tr("MENU", lang), "m:main")]])
+    nkeys = sum(len(e["keys"]) for e in entries)
+    header = "🔑 " + tr("KEYS_READY", lang).format(n=nkeys)
+    await edit(chat, mid, header)
+    for chunk in _chunk_lines(keys_extract.format_text(entries)):
+        await send(chat, f"<pre>{html.escape(chunk)}</pre>")
+    fname = (re.sub(r"[^\w.-]+", "_", entries[0]["name"]).strip("_") or "keys")[:50] + ".json"
+    await send_document(chat, fname, keys_extract.format_json_str(entries).encode("utf-8"),
+                        caption=header, rows=[[(tr("MENU", lang), "m:main")]])
+
+
 # --------------------------------------------------------------------------
 # Track selection ↔ engine flags
 # --------------------------------------------------------------------------
@@ -111,9 +207,12 @@ def sel_label(val, lang: str = "en") -> str:
 
 
 def build_flags(uid: int, service: str, profile: str, sel, quality,
-                s_lang=None, sub_extra_lang=None, cdm=None, a_lang=None):
+                s_lang=None, sub_extra_lang=None, cdm=None, a_lang=None, keys_only=False):
     """Build the unshackle download flags + quality list for a track selection (any combo of
-    video/audio/subs). Shared by the wizard (start_download) and the auto-monitor."""
+    video/audio/subs). Shared by the wizard (start_download) and the auto-monitor.
+
+    keys_only adds skip_dl + export: the engine licenses the tracks (so we get the content keys)
+    but writes no media, and returns the manifest + keys on the job as `keys_export`."""
     sel = to_sel(sel)
     q = None if (quality == "best" or "video" not in sel) else [int(quality)]
     if sel == {"audio"}:                       # audio only → keep the clean original (no remux)
@@ -149,6 +248,9 @@ def build_flags(uid: int, service: str, profile: str, sel, quality,
     if service not in config.SEGMENT_PROXY_SERVICES:
         flags["no_proxy_download"] = True
     flags["skip_subtitle_errors"] = True   # a failed subtitle never aborts the download
+    if keys_only:                          # license only: fetch keys, write nothing, return the export
+        flags["skip_dl"] = True
+        flags["export"] = True
     return flags, q
 
 
@@ -165,9 +267,12 @@ async def start_download(chat: int, uid: int, mid: int, profile: str):
     if len(active_jobs.get(uid, ())) >= limit:     # is the authoritative atomic gate
         return await edit(chat, mid, "⏳ " + tr("YOU_RE_ALREADY_DOWNLOADING", lang).format(limit=limit), [[(tr("MY_DOWNLOADS", lang), "m:dls")],
                           [(tr("MENU", lang), "m:main")]])
+    keys_only = bool(s.get("keys_only"))
     flags, q = build_flags(uid, s["service"], profile, s.get("tsel"), s.get("quality"),
-                           s.get("s_lang"), s.get("sub_extra_lang"), s.get("cdm"), a_lang=s.get("a_lang"))
-    await edit(chat, mid, "⏳ " + tr("STARTING_DOWNLOAD", lang))
+                           s.get("s_lang"), s.get("sub_extra_lang"), s.get("cdm"), a_lang=s.get("a_lang"),
+                           keys_only=keys_only)
+    await edit(chat, mid, ("🔑 " + tr("KEYS_EXTRACTING", lang)) if keys_only
+               else "⏳ " + tr("STARTING_DOWNLOAD", lang))
     users.note_recent(uid, s["service"])           # remember for the 🕘 אחרונים tab
     # snapshot the source now (not at completion) so a new wizard mid-download can't corrupt it
     await launch_download(chat, uid, mid, service=s["service"], title_id=s["title_id"],
@@ -176,7 +281,7 @@ async def start_download(chat: int, uid: int, mid: int, profile: str):
                           cover=s.get("cover"), src_url=s.get("title_id"),
                           source_media=s.get("source_media", ""),
                           description=s.get("description", ""), upload_date=s.get("upload_date", ""),
-                          cover_url=s.get("cover_url", ""))
+                          cover_url=s.get("cover_url", ""), keys_only=keys_only)
 
 
 async def download_file(file_id: str, dest: str) -> None:
@@ -208,7 +313,7 @@ _resv_seq = 0   # monotonic id for synchronous concurrency-slot reservations
 async def launch_download(chat: int, uid: int, mid: int, *, service, title_id, profile, wanted,
                           quality, flags, name, src_url=None, source_media="", retried=False,
                           send_as=None, cover=None, is_monitor=False, gate=True,
-                          description="", upload_date="", cover_url=""):
+                          description="", upload_date="", cover_url="", keys_only=False):
     """Submit a download to the engine and start polling it. The single submit seam shared by
     the wizard and the auto-monitor: validates the profile, atomically reserves a concurrency
     slot (gate=True), and carries a dl_spec for the geofence proxy retry (which passes gate=False
@@ -220,11 +325,20 @@ async def launch_download(chat: int, uid: int, mid: int, *, service, title_id, p
     # service (e.g. YouTube catch-all downloads that otherwise hit "confirm you're not a bot")
     if not auth.list_accounts(uid, service) and (auth.has_default_cookies(service) or auth.has_default_credential(service)):
         profile = auth.DEFAULT_PROFILE
+        # Credential-based default services (e.g. STING): the credential must travel in flags, but
+        # build_flags resolved it against the user's own (empty) profile before this fallback ran, so
+        # flags has none. Re-resolve for the default profile now, else the engine authenticates with
+        # nothing and the service errors "login required" (cookie defaults load by profile, so unaffected).
+        if "credential" not in flags:
+            cred = auth.get_credential(uid, service, auth.DEFAULT_PROFILE)
+            if cred:
+                flags["credential"] = cred
     if not is_monitor:                              # remember this attempt for a one-tap retry on failure
         retry_spec[uid] = dict(service=service, title_id=title_id, profile=profile, wanted=wanted,
                                quality=quality, flags=flags, name=name, src_url=src_url,
                                source_media=source_media, send_as=send_as, cover=cover,
-                               description=description, upload_date=upload_date, cover_url=cover_url)
+                               description=description, upload_date=upload_date, cover_url=cover_url,
+                               keys_only=keys_only)
     jobs = active_jobs.setdefault(uid, {})
     resv = None
     if gate:                                       # atomic check + reserve, no await in between
@@ -250,7 +364,8 @@ async def launch_download(chat: int, uid: int, mid: int, *, service, title_id, p
         spec = {"service": service, "title_id": title_id, "profile": profile, "wanted": wanted,
                 "quality": quality, "flags": flags, "name": name, "retried": retried,
                 "send_as": send_as, "cover": cover, "is_monitor": is_monitor,
-                "description": description, "upload_date": upload_date, "cover_url": cover_url}
+                "description": description, "upload_date": upload_date, "cover_url": cover_url,
+                "keys_only": keys_only}
         asyncio.create_task(poll_job(chat, uid, mid, job_id, outdir, src_url=src_url,
                                      source_media=source_media, dl_spec=spec, is_monitor=is_monitor))
     finally:
@@ -349,7 +464,8 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
             if prog != stall["p"] or sd != stall["s"]:
                 stall.update(p=prog, s=sd, t=now)
             elif (now - stall["t"] > STALL_SECS and prog < 50 and dl_spec
-                  and not dl_spec.get("retried") and dl_spec["flags"].get("no_proxy_download")
+                  and not dl_spec.get("retried") and not dl_spec.get("keys_only")
+                  and dl_spec["flags"].get("no_proxy_download")
                   and state.meta(dl_spec["service"]).get("geofence")):
                 try:
                     await engine.cancel(job_id)
@@ -377,6 +493,9 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
             if _cancelled():                         # cancelled after the engine finished, before upload
                 shutil.rmtree(outdir, ignore_errors=True)
                 return
+            if (dl_spec or {}).get("keys_only"):     # keys-only job: no files, deliver the export
+                shutil.rmtree(outdir, ignore_errors=True)
+                return await _deliver_keys(chat, uid, mid, j, lang)
             files = list_output_files(outdir)        # exactly what unshackle wrote here
             if not files:
                 shutil.rmtree(outdir, ignore_errors=True)
@@ -386,6 +505,29 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
             from urllib.parse import urlparse
             src_name = (urlparse(src_url).hostname or "").replace("www.", "") or src_url or "?"
             total = len(files)
+            # Primary delivery choice: a self-hosted, expiring download link instead of a Telegram
+            # upload (telegram/link/ask per the user's setting). 'link' is also the natural path for
+            # over-cap files (no Telegram size limit on a direct link).
+            if await _decide_link(chat, uid, mid, job_id, head_name, lang, is_monitor):
+                links = publish_link(files)                  # moves files out of outdir
+                shutil.rmtree(outdir, ignore_errors=True)
+                if not links:
+                    await edit(chat, mid, "🎉 " + tr("DONE_BUT_NO_FILE", lang),
+                               [[(tr("MENU", lang), "m:main")]])
+                    return
+                msg = "✅ " + tr("LINK_READY", lang)
+                stats = []
+                if total_bytes:
+                    stats.append(f"💾 {_fmt_size(total_bytes)}")
+                el = time.time() - t_start
+                if el >= 1:
+                    stats.append(f"⏱️ {_fmt_eta(el, lang)}")
+                if stats:
+                    msg += "\n" + " · ".join(stats)
+                msg += "\n\n" + "\n".join(f"🔗 {u}" for u in links)
+                msg += "\n\n" + tr("REC_LINK_EXPIRES", lang)
+                await edit(chat, mid, msg, [[(tr("MENU", lang), "m:main")]])
+                return
             # Optional extra: publish the whole job (all files) into ONE gofile folder -> one link.
             # Honours the user's ask/always/never setting; an over-cap file forces it on (no TG path).
             has_big = any(os.path.getsize(f) > uploader.max_cap() for f in files if os.path.exists(f))
@@ -506,7 +648,8 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                     src_url=src_url, source_media=source_media, retried=True,
                     send_as=dl_spec.get("send_as"), cover=dl_spec.get("cover"), is_monitor=is_monitor,
                     gate=False, description=dl_spec.get("description", ""),   # continues the slot, don't re-gate
-                    upload_date=dl_spec.get("upload_date", ""), cover_url=dl_spec.get("cover_url", ""))
+                    upload_date=dl_spec.get("upload_date", ""), cover_url=dl_spec.get("cover_url", ""),
+                    keys_only=dl_spec.get("keys_only", False))
             detail = " | ".join(str(x) for x in (j.get("error"), j.get("worker_stderr"),
                                                  j.get("message")) if x) or "download failed"
             await user_error(chat, mid, uid, detail, allow_retry=not is_monitor)
