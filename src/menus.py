@@ -76,6 +76,8 @@ async def main_menu(chat: int, uid: int, mid: int = None):
         rows.append([(tr("GOFILE_UPLOAD", lang), "m:gfup")])
     if users.can_keys_download(uid):                # manifest + supplied keys download
         rows.append([(tr("KEYS_DOWNLOAD", lang), "m:keys")])
+    if users.can_keys_download(uid):                # extract keys from a service (skip download)
+        rows.append([(tr("KEYS_EXTRACT", lang), "m:xkeys")])
     rows.append([(tr("SETTINGS", lang), "m:settings")])
     u = users.get(uid) or {}
     name_parts = (u.get("name") or "").split()
@@ -93,9 +95,12 @@ async def settings_menu(chat: int, uid: int, mid: int):
     cur_lang = next((name for code, name in LANGS.items() if code == lang), lang)
     mode = users.gofile_mode(uid)
     mode_label = tr(f"GOFILE_MODE_{mode.upper()}", lang)
+    dmode = users.delivery_mode(uid)
+    dmode_label = tr(f"DELIVERY_MODE_{dmode.upper()}", lang)
     tag = users.tag_pref(uid)
     rows = [
         [(f"🌐 {tr('LANGUAGE', lang)}: {cur_lang}", "m:lang")],
+        [(f"📦 {tr('DELIVERY_SETTING', lang)}: {dmode_label}", "m:dmode")],
         [(f"☁️ {tr('GOFILE_SETTING', lang)}: {mode_label}", "m:gfmode")],
         [(f"🏷️ {tr('TAG_SETTING', lang)}: {tag or tr('TAG_NONE', lang)}", "m:tag")],
         [(tr("MENU", lang), "m:main")],
@@ -129,6 +134,16 @@ async def gofile_mode_menu(chat: int, uid: int, mid: int):
             for m in users.GOFILE_MODES]
     rows.append([(tr("BACK", lang), "m:settings")])
     await edit(chat, mid, f"☁️ {tr('GOFILE_SETTING_EXPLAIN', lang)}", rows)
+
+
+async def delivery_mode_menu(chat: int, uid: int, mid: int):
+    """Pick how a finished download is delivered: Telegram upload / download link / ask each time."""
+    lang = users.lang(uid)
+    cur = users.delivery_mode(uid)
+    rows = [[(("✅ " if m == cur else "") + tr(f"DELIVERY_MODE_{m.upper()}", lang), f"dmode:{m}")]
+            for m in users.DELIVERY_MODES]
+    rows.append([(tr("BACK", lang), "m:settings")])
+    await edit(chat, mid, f"📦 {tr('DELIVERY_SETTING_EXPLAIN', lang)}", rows)
 
 
 async def language_menu(chat: int, uid: int, mid: int):
@@ -424,6 +439,11 @@ async def show_track_types(chat: int, uid: int, mid: int):
                             ("subs", tr("SUBTITLES_2", lang), s["ns"])):
         if avail:
             rows.append([(("☑️ " if k in sel else "⬜ ") + label, f"tt_tog:{k}")])
+    # Keys-only toggle: license the tracks and return the manifest + content keys, download nothing.
+    # Only offered to permitted users and only for DRM services (no keys to fetch otherwise).
+    if users.can_keys_download(uid) and state.meta(s["service"]).get("has_drm"):
+        on = bool(s.get("keys_only"))
+        rows.append([(("🔑 ✅ " if on else "🔑 ") + tr("KEYS_ONLY", lang), "kx_tog")])
     rows.append([(tr("CONTINUE", lang), "tt_go")])
     rows.append([(tr("MENU", lang), "m:main")])
 
@@ -564,6 +584,8 @@ async def continue_after_track_types(chat: int, uid: int, mid: int):
     video -> quality, subtitles-only -> maybe a subtitle language, otherwise account/go."""
     s = sess(uid)
     sel = set(s.get("tsel") or [])
+    if s.get("keys_only"):                              # keys only -> no quality/send-as, just license
+        return await pick_account_or_go(chat, uid, mid, "best")
     if "video" in sel:                                  # video -> choose quality, then send-as
         return await show_quality(chat, uid, mid)
     if sel == {"subs"}:                                 # subtitles only -> maybe pick a language

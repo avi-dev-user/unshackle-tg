@@ -17,6 +17,40 @@ def test_sel_label_localised():
     assert "וידאו" in download.sel_label(["video"], "he")
 
 
+# --- self-hosted download-link delivery ----------------------------------------------------
+def test_publish_link_moves_files_and_builds_urls(tmp_path, monkeypatch):
+    rec = tmp_path / "rec"
+    rec.mkdir()
+    monkeypatch.setattr(download, "REC_DIR", str(rec))
+    monkeypatch.setattr(download, "REC_URL_BASE", "https://dl.example.test")
+    out = tmp_path / "out"
+    out.mkdir()
+    f1 = out / "Show S01E01 [he].mkv"
+    f1.write_bytes(b"x" * 10)
+    f2 = out / "פרק.srt"                                  # non-ASCII name must be URL-encoded
+    f2.write_text("sub")
+    urls = download.publish_link([str(f1), str(f2)])
+    assert not f1.exists() and not f2.exists()           # files were MOVED out of the job dir
+    tokens = list(rec.iterdir())
+    assert len(tokens) == 1 and tokens[0].is_dir()        # one fresh token dir holds the whole job
+    assert sorted(p.name for p in tokens[0].iterdir()) == sorted(["Show S01E01 [he].mkv", "פרק.srt"])
+    assert len(urls) == 2
+    assert all(u.startswith(f"https://dl.example.test/{tokens[0].name}/") for u in urls)
+    assert all(" " not in u for u in urls)                # spaces percent-encoded -> a valid URL
+    assert any("%D7" in u for u in urls)                  # the Hebrew filename is percent-encoded
+
+
+def test_publish_link_skips_missing(tmp_path, monkeypatch):
+    rec = tmp_path / "rec"
+    rec.mkdir()
+    monkeypatch.setattr(download, "REC_DIR", str(rec))
+    monkeypatch.setattr(download, "REC_URL_BASE", "https://x.test")
+    f = tmp_path / "a.bin"
+    f.write_bytes(b"x")
+    urls = download.publish_link([str(f), str(tmp_path / "missing.bin")])
+    assert len(urls) == 1 and urls[0].endswith("/a.bin")
+
+
 def test_build_flags_combinations():
     f, q = download.build_flags(0, "SVC", "0", ["subs"], "best")
     assert f["subs_only"] and f["no_video"] and f["no_audio"] and f["sub_format"] == "SRT"

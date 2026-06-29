@@ -20,12 +20,13 @@ import aiohttp
 from . import admin, auth, config, gofile, monitors, recordings, state, sting_device, uploader, users
 from .catalog_meta import (detect_service, load_cat_overrides, set_cat_override, svc_auth_required,
                            unwrap_url)
-from .download import (answer_gofile_ask, download_file, download_file_stream, launch_download,
-                       redraw_progress, retry_spec, start_download, to_sel)
+from .download import (answer_gofile_ask, answer_link_ask, download_file, download_file_stream,
+                       launch_download, redraw_progress, retry_spec, start_download, to_sel)
 from .errors import report_error
 from .i18n import tr
 from .menus import (_after_account, _search_labels, account_service, accounts_menu, ask_input, cdm_menu,
-                    gofile_mode_menu, language_menu, main_menu, my_downloads, pick_account_or_go, picker,
+                    delivery_mode_menu, gofile_mode_menu, language_menu, main_menu, my_downloads,
+                    pick_account_or_go, picker,
                     continue_after_track_types, settings_menu, service_detail, services_grid,
                     show_audio_langs, show_dl_cover, show_episodes,
                     show_gofile_folder, show_quality, show_search_results, show_send_as, show_sub_langs,
@@ -125,6 +126,11 @@ async def on_callback(cq: dict):
     if data.startswith("gfmode:"):
         users.set_gofile_mode(uid, data.split(":", 1)[1])
         return await gofile_mode_menu(chat, uid, mid)
+    if data == "m:dmode":
+        return await delivery_mode_menu(chat, uid, mid)
+    if data.startswith("dmode:"):
+        users.set_delivery_mode(uid, data.split(":", 1)[1])
+        return await delivery_mode_menu(chat, uid, mid)
     if data == "m:tag":
         return await tag_menu(chat, uid, mid)
     if data == "tagset":
@@ -135,6 +141,9 @@ async def on_callback(cq: dict):
     if data.startswith("gfask:"):                    # answer to the "upload to gofile?" prompt
         _, jid, yn = data.split(":", 2)
         return answer_gofile_ask(jid, yn == "y")
+    if data.startswith("lnk:"):                       # Telegram vs download-link choice for this job
+        _, jid, lt = data.split(":", 2)
+        return answer_link_ask(jid, lt == "l")
     if data.startswith("gfd:"):                      # gofile download folder controls
         gf = sess(uid).get("gfd") or {}
         if data in ("gfd:sa:video", "gfd:sa:file"):
@@ -161,8 +170,17 @@ async def on_callback(cq: dict):
         s.pop("keys_url", None)
         s["step"] = "await_keys_dl"
         return await edit(chat, mid, "🔑 " + tr("KEYS_SEND_PROMPT", lang), [[(tr("MENU", lang), "m:main")]])
+    if data == "m:xkeys":                            # extract keys from a service (license only, no download)
+        if not users.can_keys_download(uid):
+            return
+        s = sess(uid)
+        s["subs_mode"] = False
+        s["keys_only"] = True
+        return await picker(chat, uid, mid, "recent", 0)
     if data == "m:dl":
-        sess(uid)["subs_mode"] = False
+        s = sess(uid)
+        s["subs_mode"] = False
+        s["keys_only"] = False                       # normal download (clear any prior keys-only mode)
         return await picker(chat, uid, mid, "recent", 0)
     if data == "m:search":
         sess(uid)["subs_mode"] = False
@@ -452,15 +470,21 @@ async def on_callback(cq: dict):
         sel ^= {k}
         sess(uid)["tsel"] = list(sel)
         return await show_track_types(chat, uid, mid)
+    if data == "kx_tog":                                    # toggle keys-only mode
+        if not users.can_keys_download(uid):
+            return
+        sess(uid)["keys_only"] = not sess(uid).get("keys_only")
+        return await show_track_types(chat, uid, mid)
     if data == "tt:back":
         return await show_track_types(chat, uid, mid)
     if data == "tt_go":                                     # continue with the checked tracks
-        sel = set(sess(uid).get("tsel") or [])
+        s = sess(uid)
+        sel = set(s.get("tsel") or [])
         if not sel:
             return await show_track_types(chat, uid, mid)   # nothing checked → re-show
-        sess(uid)["send_as"] = None
-        sess(uid)["a_lang"] = None                          # fresh audio-language choice per title
-        if "audio" in sel and len(sess(uid).get("audio_langs") or []) > 1:
+        s["send_as"] = None
+        s["a_lang"] = None                                  # fresh audio-language choice per title
+        if not s.get("keys_only") and "audio" in sel and len(s.get("audio_langs") or []) > 1:
             return await show_audio_langs(chat, uid, mid)   # several audio languages → let user pick
         return await continue_after_track_types(chat, uid, mid)
     if data.startswith("al:"):                              # chosen audio language ("all" = keep every language)
