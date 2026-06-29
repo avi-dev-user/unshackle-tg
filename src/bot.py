@@ -24,6 +24,7 @@ from .download import (answer_gofile_ask, answer_link_ask, download_file, downlo
                        launch_download, redraw_progress, retry_spec, start_download, to_sel)
 from .errors import report_error
 from .i18n import tr
+from .keepalive import keepalive_loop
 from .menus import (_after_account, _search_labels, account_service, accounts_menu, ask_input, cdm_menu,
                     delivery_mode_menu, gofile_mode_menu, language_menu, main_menu, my_downloads,
                     pick_account_or_go, picker,
@@ -1156,6 +1157,7 @@ async def run():
     load_cat_overrides()
     asyncio.create_task(monitor_loop())            # background auto-monitor scheduler
     asyncio.create_task(_heartbeat_loop())         # liveness beat for the watchdog CronJob
+    asyncio.create_task(keepalive_loop())          # keep the shared default tokens warm (STING/DSNP)
     me = await call("getMe")
     if not me.get("ok"):
         raise SystemExit(f"Bot login failed: {me}")
