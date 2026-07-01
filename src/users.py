@@ -388,6 +388,27 @@ def set_delivery_mode(tg_id: int, mode: str) -> dict | None:
     return u
 
 
+SERVICE_VIEW_MODES = ("available", "all")
+
+
+def service_view_mode(tg_id: int) -> str:
+    """Which services to show in the normal picker:
+    'available' - hide subscription services until the user has an account/default;
+    'all' - show every permitted service."""
+    u = _by_id(tg_id)
+    m = (u or {}).get("service_view_mode")
+    return m if m in SERVICE_VIEW_MODES else "available"
+
+
+def set_service_view_mode(tg_id: int, mode: str) -> dict | None:
+    u = _by_id(tg_id)
+    if u is None or mode not in SERVICE_VIEW_MODES:
+        return None
+    u["service_view_mode"] = mode
+    _save()
+    return u
+
+
 # release-group tag the user wants appended to output filenames (scene-style "-TAG").
 _TAG_ALLOWED = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-")
 TAG_MAX_LEN = 24
