@@ -145,6 +145,14 @@ async def on_callback(cq: dict):
     if data.startswith("lnk:"):                       # Telegram vs download-link choice for this job
         _, jid, lt = data.split(":", 2)
         return answer_link_ask(jid, lt == "l")
+    if data.startswith("predlv:"):                    # pre-download Telegram vs download-link choice
+        sess(uid)["delivery_link"] = data.rsplit(":", 1)[1] == "l"
+        sess(uid)["_preflight_delivery_done"] = True
+        return await start_download(chat, uid, mid, sess(uid).get("dl_profile", str(uid)))
+    if data.startswith("pregf:"):                     # pre-download "also upload to gofile?" choice
+        sess(uid)["gofile"] = data.rsplit(":", 1)[1] == "y"
+        sess(uid)["_preflight_gofile_done"] = True
+        return await start_download(chat, uid, mid, sess(uid).get("dl_profile", str(uid)))
     if data.startswith("gfd:"):                      # gofile download folder controls
         gf = sess(uid).get("gfd") or {}
         if data in ("gfd:sa:video", "gfd:sa:file"):

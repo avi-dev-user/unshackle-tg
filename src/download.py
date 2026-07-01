@@ -274,6 +274,33 @@ async def start_download(chat: int, uid: int, mid: int, profile: str):
         return await edit(chat, mid, "⏳ " + tr("YOU_RE_ALREADY_DOWNLOADING", lang).format(limit=limit), [[(tr("MY_DOWNLOADS", lang), "m:dls")],
                           [(tr("MENU", lang), "m:main")]])
     keys_only = bool(s.get("keys_only"))
+    if not keys_only:
+        name = s.get("name") or s.get("service", "") or tr("DOWNLOAD", lang)
+        svc = s.get("service", "")
+        head_name = html.escape(str(name))[:48] + (f" · 📺 {html.escape(svc)}" if svc else "")
+        delivery_mode = users.delivery_mode(uid)
+        if not s.get("_preflight_delivery_done"):
+            s["dl_profile"] = profile
+            if delivery_mode == "ask":
+                rows = [[(tr("DELIVER_TELEGRAM", lang), "predlv:t"),
+                         (tr("DELIVER_LINK", lang), "predlv:l")]]
+                return await edit(chat, mid, f"🎬 {head_name}\n📦 " + tr("ASK_DELIVERY", lang), rows)
+            s["delivery_link"] = delivery_mode == "link"
+            s["_preflight_delivery_done"] = True
+        if s.get("delivery_link"):
+            s["_preflight_gofile_done"] = True
+            s["gofile"] = False
+        elif not s.get("_preflight_gofile_done"):
+            gofile_mode = users.gofile_mode(uid)
+            s["dl_profile"] = profile
+            if gofile_mode == "ask":
+                rows = [[(tr("YES_GOFILE", lang), "pregf:y"),
+                         (tr("NO_TG_ONLY", lang), "pregf:n")]]
+                return await edit(chat, mid, f"🎬 {head_name}\n☁️ " + tr("ASK_GOFILE", lang), rows)
+            s["gofile"] = gofile_mode == "always"
+            s["_preflight_gofile_done"] = True
+    delivery_link = bool(s.get("delivery_link")) if not keys_only else False
+    gofile_choice = bool(s.get("gofile")) if not keys_only else False
     flags, q = build_flags(uid, s["service"], profile, s.get("tsel"), s.get("quality"),
                            s.get("s_lang"), s.get("sub_extra_lang"), s.get("cdm"), a_lang=s.get("a_lang"),
                            keys_only=keys_only)
@@ -287,7 +314,10 @@ async def start_download(chat: int, uid: int, mid: int, profile: str):
                           cover=s.get("cover"), src_url=s.get("title_id"),
                           source_media=s.get("source_media", ""),
                           description=s.get("description", ""), upload_date=s.get("upload_date", ""),
-                          cover_url=s.get("cover_url", ""), keys_only=keys_only)
+                          cover_url=s.get("cover_url", ""), keys_only=keys_only,
+                          delivery_link=delivery_link, gofile_upload=gofile_choice)
+    for k in ("_preflight_delivery_done", "_preflight_gofile_done", "delivery_link", "gofile"):
+        s.pop(k, None)
 
 
 async def download_file(file_id: str, dest: str) -> None:
@@ -319,7 +349,8 @@ _resv_seq = 0   # monotonic id for synchronous concurrency-slot reservations
 async def launch_download(chat: int, uid: int, mid: int, *, service, title_id, profile, wanted,
                           quality, flags, name, src_url=None, source_media="", retried=False,
                           send_as=None, cover=None, is_monitor=False, gate=True,
-                          description="", upload_date="", cover_url="", keys_only=False):
+                          description="", upload_date="", cover_url="", keys_only=False,
+                          delivery_link=None, gofile_upload=None):
     """Submit a download to the engine and start polling it. The single submit seam shared by
     the wizard and the auto-monitor: validates the profile, atomically reserves a concurrency
     slot (gate=True), and carries a dl_spec for the geofence proxy retry (which passes gate=False
@@ -344,7 +375,8 @@ async def launch_download(chat: int, uid: int, mid: int, *, service, title_id, p
                                quality=quality, flags=flags, name=name, src_url=src_url,
                                source_media=source_media, send_as=send_as, cover=cover,
                                description=description, upload_date=upload_date, cover_url=cover_url,
-                               keys_only=keys_only)
+                               keys_only=keys_only, delivery_link=delivery_link,
+                               gofile_upload=gofile_upload)
     jobs = active_jobs.setdefault(uid, {})
     resv = None
     if gate:                                       # atomic check + reserve, no await in between
@@ -371,7 +403,8 @@ async def launch_download(chat: int, uid: int, mid: int, *, service, title_id, p
                 "quality": quality, "flags": flags, "name": name, "retried": retried,
                 "send_as": send_as, "cover": cover, "is_monitor": is_monitor,
                 "description": description, "upload_date": upload_date, "cover_url": cover_url,
-                "keys_only": keys_only}
+                "keys_only": keys_only, "delivery_link": delivery_link,
+                "gofile_upload": gofile_upload}
         asyncio.create_task(poll_job(chat, uid, mid, job_id, outdir, src_url=src_url,
                                      source_media=source_media, dl_spec=spec, is_monitor=is_monitor))
     finally:
@@ -487,7 +520,9 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                     src_url=src_url, source_media=source_media, retried=True,
                     send_as=dl_spec.get("send_as"), cover=dl_spec.get("cover"), is_monitor=is_monitor,
                     gate=False, description=dl_spec.get("description", ""),
-                    upload_date=dl_spec.get("upload_date", ""), cover_url=dl_spec.get("cover_url", ""))
+                    upload_date=dl_spec.get("upload_date", ""), cover_url=dl_spec.get("cover_url", ""),
+                    delivery_link=dl_spec.get("delivery_link"),
+                    gofile_upload=dl_spec.get("gofile_upload"))
             elif (now - stall["t"] > PROXY_STALL_SECS and prog < 50 and dl_spec
                   and not dl_spec.get("keys_only")
                   and not dl_spec["flags"].get("no_proxy_download")):
@@ -526,7 +561,11 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
             # Primary delivery choice: a self-hosted, expiring download link instead of a Telegram
             # upload (telegram/link/ask per the user's setting). 'link' is also the natural path for
             # over-cap files (no Telegram size limit on a direct link).
-            if await _decide_link(chat, uid, mid, job_id, head_name, lang, is_monitor):
+            if dl_spec and dl_spec.get("delivery_link") is not None:
+                use_link = bool(dl_spec.get("delivery_link"))
+            else:
+                use_link = await _decide_link(chat, uid, mid, job_id, head_name, lang, is_monitor)
+            if use_link:
                 links = publish_link(files)                  # moves files out of outdir
                 shutil.rmtree(outdir, ignore_errors=True)
                 if not links:
@@ -549,7 +588,12 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
             # Optional extra: publish the whole job (all files) into ONE gofile folder -> one link.
             # Honours the user's ask/always/never setting; an over-cap file forces it on (no TG path).
             has_big = any(os.path.getsize(f) > uploader.max_cap() for f in files if os.path.exists(f))
-            want_gf = await _decide_gofile(chat, uid, mid, job_id, head_name, lang, is_monitor, has_big)
+            if has_big:
+                want_gf = True
+            elif dl_spec and dl_spec.get("gofile_upload") is not None:
+                want_gf = bool(dl_spec.get("gofile_upload"))
+            else:
+                want_gf = await _decide_gofile(chat, uid, mid, job_id, head_name, lang, is_monitor, has_big)
             gf_sess = gofile.Session() if want_gf else None
             for idx, path in enumerate(files, 1):
                 if _cancelled():                     # cancelled mid multi-file upload
@@ -673,7 +717,9 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                     send_as=dl_spec.get("send_as"), cover=dl_spec.get("cover"), is_monitor=is_monitor,
                     gate=False, description=dl_spec.get("description", ""),   # continues the slot, don't re-gate
                     upload_date=dl_spec.get("upload_date", ""), cover_url=dl_spec.get("cover_url", ""),
-                    keys_only=dl_spec.get("keys_only", False))
+                    keys_only=dl_spec.get("keys_only", False),
+                    delivery_link=dl_spec.get("delivery_link"),
+                    gofile_upload=dl_spec.get("gofile_upload"))
             await user_error(chat, mid, uid, detail, allow_retry=not is_monitor)
             return
     shutil.rmtree(outdir, ignore_errors=True)
