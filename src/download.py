@@ -424,6 +424,7 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
     hist = []                                 # (time, pct) samples → ETA estimate
     stall = {"p": -1, "s": None, "t": time.time()}   # watchdog: last (pct, segments, change-time)
     STALL_SECS = 75                           # no progress this long (early) → fall back to proxy
+    PROXY_STALL_SECS = 120                    # proxy downloads stalling longer → fail with network error
 
     def _cancelled() -> bool:
         return bool((active_jobs.get(uid, {}).get(job_id) or {}).get("cancelled"))
@@ -481,6 +482,17 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                     send_as=dl_spec.get("send_as"), cover=dl_spec.get("cover"), is_monitor=is_monitor,
                     gate=False, description=dl_spec.get("description", ""),
                     upload_date=dl_spec.get("upload_date", ""), cover_url=dl_spec.get("cover_url", ""))
+            elif (now - stall["t"] > PROXY_STALL_SECS and prog < 50 and dl_spec
+                  and not dl_spec.get("keys_only")
+                  and not dl_spec["flags"].get("no_proxy_download")):
+                # proxy download is stalling (CDN unreachable through proxy, silent hang)
+                try:
+                    await engine.cancel(job_id)
+                except Exception:
+                    pass
+                await user_error(chat, mid, uid, "timed out connecting to CDN through proxy",
+                                 allow_retry=not is_monitor)
+                return
             line = _render_progress(head=f"🎬 {head_name}\n⬇️ {_phase(j.get('phase'), lang)}",
                                     pct=prog, eta=eta, segs_done=sd, segs_total=st_,
                                     speed_str=j.get("speed"))
