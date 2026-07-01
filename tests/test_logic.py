@@ -88,6 +88,12 @@ def test_build_flags_combinations():
     f, q = download.build_flags(0, "SVC", "0", ["video"], "best")
     assert q is None                                             # 'best' -> no explicit quality
 
+    f, _ = download.build_flags(0, "SVC", "0", ["video", "audio"], "best", vcodec=["HEVC"])
+    assert f["vcodec"] == ["HEVC"]
+
+    f, _ = download.build_flags(0, "SVC", "0", ["audio"], "best", vcodec=["HEVC"])
+    assert "vcodec" not in f
+
 
 # --- catalog_meta: data-driven categorisation ---------------------------------------------
 def test_categorise_precedence(monkeypatch):
