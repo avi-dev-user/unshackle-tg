@@ -369,13 +369,13 @@ DELIVERY_MODES = ("telegram", "link", "ask")
 
 def delivery_mode(tg_id: int) -> str:
     """How this user wants a finished download delivered:
-    'telegram' (default) - upload the file to Telegram; 'link' - publish it behind a
+    'telegram' - upload the file to Telegram; 'link' - publish it behind a
     self-hosted, auto-expiring download link instead of uploading; 'ask' - prompt per
     download. Distinct from gofile_mode: that adds an EXTRA third-party link alongside
     Telegram; this chooses the primary delivery (and 'link' skips the Telegram upload)."""
     u = _by_id(tg_id)
     m = (u or {}).get("delivery_mode")
-    return m if m in DELIVERY_MODES else "telegram"
+    return m if m in DELIVERY_MODES else "ask"
 
 
 def set_delivery_mode(tg_id: int, mode: str) -> dict | None:
