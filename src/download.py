@@ -105,6 +105,36 @@ def publish_link(files: list[str]) -> list[str]:
     return urls
 
 
+def _download_link_kind(name: str, lang: str) -> str:
+    ext = os.path.splitext(name.lower())[1]
+    if ext in {".mkv", ".mp4", ".mov", ".avi", ".ts", ".webm"}:
+        return "🎬 וידאו" if lang == "he" else "🎬 Video"
+    if ext in {".srt", ".vtt", ".ass", ".ssa", ".ttml", ".stpp", ".wvtt"}:
+        return "💬 כתוביות" if lang == "he" else "💬 Subtitles"
+    if ext in {".m4a", ".mka", ".mp3", ".aac", ".flac", ".opus", ".wav"}:
+        return "🎧 אודיו" if lang == "he" else "🎧 Audio"
+    return "📄 קובץ" if lang == "he" else "📄 File"
+
+
+def _format_download_links(items: list[dict], links: list[str], lang: str) -> str:
+    if not items or not links:
+        return ""
+    file_label = "קובץ" if lang == "he" else "File"
+    files_label = "קבצים" if lang == "he" else "Files"
+    heading = file_label if len(links) == 1 else files_label
+    lines = [f"📦 {heading}:"]
+    for item, url in zip(items, links):
+        name = html.escape(str(item.get("name") or "download"))
+        href = html.escape(url, quote=True)
+        size = item.get("size") or 0
+        kind = _download_link_kind(str(item.get("name") or ""), lang)
+        meta = kind
+        if size:
+            meta += f" · 💾 {_fmt_size(size)}"
+        lines.append(f'\n{meta}\n<a href="{href}">{name}</a>')
+    return "\n".join(lines)
+
+
 async def _decide_gofile(chat: int, uid: int, mid: int, job_id: str, head_name: str,
                          lang: str, is_monitor: bool, has_big: bool) -> bool:
     """Whether to also publish this job's files to a gofile folder link. Honours the user's
@@ -575,7 +605,16 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
             else:
                 use_link = await _decide_link(chat, uid, mid, job_id, head_name, lang, is_monitor)
             if use_link:
-                links = publish_link(files)                  # moves files out of outdir
+                link_items = [
+                    {
+                        "path": f,
+                        "name": os.path.basename(f),
+                        "size": os.path.getsize(f),
+                    }
+                    for f in files
+                    if os.path.exists(f)
+                ]
+                links = publish_link([item["path"] for item in link_items])  # moves files out of outdir
                 shutil.rmtree(outdir, ignore_errors=True)
                 if not links:
                     await edit(chat, mid, "🎉 " + tr("DONE_BUT_NO_FILE", lang),
@@ -590,7 +629,9 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                     stats.append(f"⏱️ {_fmt_eta(el, lang)}")
                 if stats:
                     msg += "\n" + " · ".join(stats)
-                msg += "\n\n" + "\n".join(f"🔗 {u}" for u in links)
+                link_block = _format_download_links(link_items, links, lang)
+                if link_block:
+                    msg += "\n\n" + link_block
                 msg += "\n\n" + tr("REC_LINK_EXPIRES", lang)
                 await edit(chat, mid, msg, [[(tr("MENU", lang), "m:main")]])
                 return
