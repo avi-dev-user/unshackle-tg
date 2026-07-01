@@ -247,6 +247,12 @@ def build_flags(uid: int, service: str, profile: str, sel, quality,
     # CloudFront 900p) must route segments through the proxy too - list them in SEGMENT_PROXY_SERVICES.
     if service not in config.SEGMENT_PROXY_SERVICES:
         flags["no_proxy_download"] = True
+    else:
+        # The engine worker subprocess runs with proxy_providers=[] so GEOFENCE never auto-resolves
+        # the proxy. Pass it explicitly so the worker sets it into session.proxies from the start.
+        # The service's authenticate() saves it as _cdn_proxy and clears session.proxies for API
+        # calls; get_tracks() restores it so track.download() picks it up for segment fetching.
+        flags["proxy"] = config.SEGMENT_PROXY_URL
     flags["skip_subtitle_errors"] = True   # a failed subtitle never aborts the download
     if keys_only:                          # license only: fetch keys, write nothing, return the export
         flags["skip_dl"] = True

@@ -64,6 +64,9 @@ FEED_SERVICE = os.environ.get("FEED_SERVICE", "")
 # (faster); list a tag here only when direct segment fetches get geo-blocked (e.g. MAKO's
 # CloudFront 900p renditions are IL-locked, while its AKAMAI ones are not).
 SEGMENT_PROXY_SERVICES = set(_json_env("SEGMENT_PROXY_SERVICES", []))
+# Proxy URL passed explicitly to the engine worker for segment downloads on geo-locked services.
+# The worker subprocess uses proxy_providers=[] so GEOFENCE can't auto-resolve; we pass it directly.
+SEGMENT_PROXY_URL = os.environ.get("SEGMENT_PROXY_URL", "http://127.0.0.1:8889")
 
 # --- Monitors ---
 # IANA timezone for fixed-time monitor schedules (e.g. "Asia/Jerusalem"). Default UTC.
