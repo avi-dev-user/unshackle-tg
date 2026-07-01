@@ -15,7 +15,7 @@ from urllib.parse import quote
 
 import aiohttp
 
-from . import auth, config, gofile, keys_extract, state, uploader, users
+from . import auth, config, gofile, keys_extract, metadata, state, uploader, users
 from .catalog_meta import can_use
 from .engine import UnshackleError
 from .errors import report_error, user_error
@@ -87,22 +87,75 @@ async def _decide_link(chat: int, uid: int, mid: int, job_id: str, head_name: st
     return bool(_lnk_ans.pop(job_id, None))     # no answer in time -> Telegram (the default)
 
 
-def publish_link(files: list[str]) -> list[str]:
+def _write_download_index(dest_dir: str, title: str, items: list[dict], lang: str) -> None:
+    file_word = "קבצים" if lang == "he" else "Files"
+    expires = tr("REC_LINK_EXPIRES", lang)
+    rows = []
+    for item in items:
+        name = html.escape(str(item.get("name") or "download"))
+        url = quote(str(item.get("name") or "download"))
+        kind = html.escape(_download_link_kind(str(item.get("name") or ""), lang))
+        size = html.escape(_fmt_size(item.get("size") or 0))
+        details = str(item.get("details_html") or "")
+        rows.append(
+            "<article>"
+            f"<div class=\"meta\">{kind} · {size}</div>"
+            f"<a class=\"file\" href=\"{url}\" download>{name}</a>"
+            f"{details}"
+            "</article>"
+        )
+    direction = "rtl" if lang == "he" else "ltr"
+    page = f"""<!doctype html>
+<html lang="{html.escape(lang)}" dir="{direction}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{html.escape(title or file_word)}</title>
+<style>
+:root {{ color-scheme: dark light; font-family: system-ui, -apple-system, Segoe UI, sans-serif; }}
+body {{ margin: 0; background: #111827; color: #f9fafb; }}
+main {{ max-width: 900px; margin: 0 auto; padding: 28px 18px 42px; }}
+h1 {{ font-size: 24px; margin: 0 0 8px; }}
+.hint {{ color: #cbd5e1; margin: 0 0 22px; }}
+article {{ border: 1px solid #334155; border-radius: 8px; padding: 14px; margin: 12px 0; background: #1f2937; }}
+.meta {{ color: #cbd5e1; font-size: 14px; margin-bottom: 8px; }}
+.file {{ color: #93c5fd; font-weight: 700; overflow-wrap: anywhere; }}
+blockquote {{ border-inline-start: 3px solid #64748b; margin: 12px 0 0; padding-inline-start: 10px; color: #e5e7eb; }}
+code {{ color: #fef3c7; }}
+</style>
+</head>
+<body><main>
+<h1>{html.escape(title or file_word)}</h1>
+<p class="hint">{html.escape(expires)}</p>
+{''.join(rows)}
+</main></body></html>
+"""
+    with open(os.path.join(dest_dir, "index.html"), "w", encoding="utf-8") as f:
+        f.write(page)
+
+
+def publish_link(files: list[str], title: str = "", items: list[dict] | None = None,
+                 lang: str = "en") -> dict:
     """Move the job's files into one fresh token dir under REC_DIR (nginx-served) and return
     their public URLs. The move is same-filesystem (instant) since out and REC_DIR share /data."""
     if not REC_URL_BASE:
-        return []
+        return {"links": [], "page_url": ""}
     token = secrets.token_urlsafe(18)
     dest_dir = os.path.join(REC_DIR, token)
     os.makedirs(dest_dir, exist_ok=True)
     urls = []
+    published = []
     for path in files:
         if not os.path.exists(path):
             continue
         name = os.path.basename(path)
         shutil.move(path, os.path.join(dest_dir, name))
         urls.append(f"{REC_URL_BASE}/{token}/{quote(name)}")
-    return urls
+        if items:
+            published.append(next((i for i in items if i.get("path") == path), {"name": name}))
+    if published:
+        _write_download_index(dest_dir, title, published, lang)
+    return {"links": urls, "page_url": f"{REC_URL_BASE}/{token}/" if published else ""}
 
 
 def _download_link_kind(name: str, lang: str) -> str:
@@ -116,14 +169,18 @@ def _download_link_kind(name: str, lang: str) -> str:
     return "📄 קובץ" if lang == "he" else "📄 File"
 
 
-def _format_download_links(items: list[dict], links: list[str], lang: str) -> str:
+def _format_download_links(items: list[dict], links: list[str], lang: str,
+                           page_url: str = "") -> str:
     if not items or not links:
         return ""
     file_label = "קובץ" if lang == "he" else "File"
     files_label = "קבצים" if lang == "he" else "Files"
+    page_label = "עמוד הורדה מסודר" if lang == "he" else "Download page"
     heading = file_label if len(links) == 1 else files_label
     lines = [f"📦 {heading}:"]
-    for item, url in zip(items, links):
+    if page_url and len(links) > 1:
+        lines.append(f'\n🔗 <a href="{html.escape(page_url, quote=True)}">{page_label}</a>')
+    for item, url in list(zip(items, links))[:12]:
         name = html.escape(str(item.get("name") or "download"))
         href = html.escape(url, quote=True)
         size = item.get("size") or 0
@@ -132,6 +189,35 @@ def _format_download_links(items: list[dict], links: list[str], lang: str) -> st
         if size:
             meta += f" · 💾 {_fmt_size(size)}"
         lines.append(f'\n{meta}\n<a href="{href}">{name}</a>')
+        details = str(item.get("details_html") or "")
+        if details and len(links) <= 3:
+            lines.append(details)
+    if len(links) > 12:
+        lines.append(f"\n... +{len(links) - 12}")
+    return "\n".join(lines)
+
+
+def _format_file_summary(items: list[dict], lang: str, details_limit: int = 3) -> str:
+    if not items:
+        return ""
+    file_label = "קובץ" if lang == "he" else "File"
+    files_label = "קבצים" if lang == "he" else "Files"
+    heading = file_label if len(items) == 1 else files_label
+    lines = [f"📦 {heading}:"]
+    for item in items[:12]:
+        name = html.escape(str(item.get("name") or "download"))
+        kind = _download_link_kind(str(item.get("name") or ""), lang)
+        size = item.get("size") or 0
+        meta = kind
+        if size:
+            meta += f" · 💾 {_fmt_size(size)}"
+        lines.append(f"\n{meta}\n<code>{name}</code>")
+        details = str(item.get("details_html") or "")
+        if details and len(items) <= details_limit:
+            lines.append(details)
+    if len(items) > 12:
+        more = len(items) - 12
+        lines.append(f"\n... +{more}")
     return "\n".join(lines)
 
 
@@ -610,11 +696,14 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                         "path": f,
                         "name": os.path.basename(f),
                         "size": os.path.getsize(f),
+                        "details_html": metadata.media_details_block(f, lang),
                     }
                     for f in files
                     if os.path.exists(f)
                 ]
-                links = publish_link([item["path"] for item in link_items])  # moves files out of outdir
+                published = publish_link([item["path"] for item in link_items],
+                                         title=head_name, items=link_items, lang=lang)
+                links = published.get("links") or []
                 shutil.rmtree(outdir, ignore_errors=True)
                 if not links:
                     await edit(chat, mid, "🎉 " + tr("DONE_BUT_NO_FILE", lang),
@@ -629,7 +718,8 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                     stats.append(f"⏱️ {_fmt_eta(el, lang)}")
                 if stats:
                     msg += "\n" + " · ".join(stats)
-                link_block = _format_download_links(link_items, links, lang)
+                link_block = _format_download_links(link_items, links, lang,
+                                                    page_url=published.get("page_url") or "")
                 if link_block:
                     msg += "\n\n" + link_block
                 msg += "\n\n" + tr("REC_LINK_EXPIRES", lang)
@@ -648,6 +738,16 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
             else:
                 want_gf = await _decide_gofile(chat, uid, mid, job_id, head_name, lang, is_monitor, has_big)
             gf_sess = gofile.Session() if want_gf else None
+            file_items = [
+                {
+                    "path": f,
+                    "name": os.path.basename(f),
+                    "size": os.path.getsize(f),
+                    "details_html": metadata.media_details_block(f, lang),
+                }
+                for f in files
+                if os.path.exists(f)
+            ]
             for idx, path in enumerate(files, 1):
                 if _cancelled():                     # cancelled mid multi-file upload
                     shutil.rmtree(outdir, ignore_errors=True)
@@ -750,6 +850,9 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                 msg += "\n⚠️ " + tr("SUBTITLES_THAT_WEREN_AVAILABLE", lang) \
                     + ", ".join(_lang_label(s, lang) for s in skipped)
             if gf_link:                                  # one folder link for the whole job
+                summary = _format_file_summary(file_items, lang)
+                if summary:
+                    msg += "\n\n" + summary
                 msg += "\n\n🔗 " + tr("GOFILE_READY", lang) + f"\n{gf_link}"
             await edit(chat, mid, msg, [[(tr("MENU", lang), "m:main")]])
             return

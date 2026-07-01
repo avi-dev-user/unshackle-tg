@@ -29,7 +29,8 @@ def test_publish_link_moves_files_and_builds_urls(tmp_path, monkeypatch):
     f1.write_bytes(b"x" * 10)
     f2 = out / "פרק.srt"                                  # non-ASCII name must be URL-encoded
     f2.write_text("sub")
-    urls = download.publish_link([str(f1), str(f2)])
+    published = download.publish_link([str(f1), str(f2)])
+    urls = published["links"]
     assert not f1.exists() and not f2.exists()           # files were MOVED out of the job dir
     tokens = list(rec.iterdir())
     assert len(tokens) == 1 and tokens[0].is_dir()        # one fresh token dir holds the whole job
@@ -38,6 +39,7 @@ def test_publish_link_moves_files_and_builds_urls(tmp_path, monkeypatch):
     assert all(u.startswith(f"https://dl.example.test/{tokens[0].name}/") for u in urls)
     assert all(" " not in u for u in urls)                # spaces percent-encoded -> a valid URL
     assert any("%D7" in u for u in urls)                  # the Hebrew filename is percent-encoded
+    assert published["page_url"] == ""                    # no index page without item metadata
 
 
 def test_publish_link_skips_missing(tmp_path, monkeypatch):
@@ -47,8 +49,24 @@ def test_publish_link_skips_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(download, "REC_URL_BASE", "https://x.test")
     f = tmp_path / "a.bin"
     f.write_bytes(b"x")
-    urls = download.publish_link([str(f), str(tmp_path / "missing.bin")])
+    urls = download.publish_link([str(f), str(tmp_path / "missing.bin")])["links"]
     assert len(urls) == 1 and urls[0].endswith("/a.bin")
+
+
+def test_publish_link_builds_index_when_items_are_provided(tmp_path, monkeypatch):
+    rec = tmp_path / "rec"
+    rec.mkdir()
+    monkeypatch.setattr(download, "REC_DIR", str(rec))
+    monkeypatch.setattr(download, "REC_URL_BASE", "https://x.test")
+    f = tmp_path / "movie.mkv"
+    f.write_bytes(b"x")
+    items = [{"path": str(f), "name": f.name, "size": 1, "details_html": "<blockquote>ok</blockquote>"}]
+    published = download.publish_link([str(f)], title="Movie", items=items, lang="he")
+    token_dir = next(rec.iterdir())
+    assert published["page_url"] == f"https://x.test/{token_dir.name}/"
+    index = token_dir / "index.html"
+    assert index.exists()
+    assert "movie.mkv" in index.read_text()
 
 
 def test_build_flags_combinations():

@@ -17,7 +17,7 @@ import time
 
 import aiohttp
 
-from . import admin, auth, config, gofile, monitors, recordings, state, sting_device, uploader, users
+from . import admin, auth, config, gofile, metadata, monitors, recordings, state, sting_device, uploader, users
 from .catalog_meta import (detect_service, load_cat_overrides, set_cat_override, svc_auth_required,
                            unwrap_url)
 from .download import (answer_gofile_ask, answer_link_ask, download_file, download_file_stream,
@@ -845,7 +845,9 @@ async def on_message(msg: dict):
         try:
             await download_file_stream(obj["file_id"], dest)
             url = await gofile.upload(dest)
-            await edit(chat, mid, "✅ " + tr("GOFILE_READY", lang) + f"\n{url}",
+            details = metadata.media_details_block(dest, lang)
+            info = f"\n\n{details}" if details else ""
+            await edit(chat, mid, "✅ " + tr("GOFILE_READY", lang) + info + f"\n\n{url}",
                        [[(tr("MENU", lang), "m:main")]])
         except Exception as e:
             await edit(chat, mid, "🔴 " + tr("UPLOAD_FAILED_GOFILE", lang).format(err=html.escape(str(e))),
