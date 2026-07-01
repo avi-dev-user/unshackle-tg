@@ -220,7 +220,7 @@ def build_flags(uid: int, service: str, profile: str, sel, quality,
     if sel == {"audio"}:                       # audio only → keep the clean original (no remux)
         flags = {"audio_only": True, "no_video": True, "no_mux": True}
     elif sel == {"subs"}:                      # subtitles only
-        flags = {"subs_only": True, "no_video": True, "no_audio": True, "no_mux": True, "sub_format": "SRT"}
+        flags = {"subs_only": True, "no_video": True, "no_audio": True, "no_mux": True}
     else:                                      # any combo: drop what isn't selected
         flags = {}
         if "video" not in sel:
@@ -230,6 +230,7 @@ def build_flags(uid: int, service: str, profile: str, sel, quality,
         if "subs" not in sel:
             flags["no_subs"] = True
     if "subs" in sel:
+        flags["sub_format"] = "SRT"
         if s_lang:
             flags["s_lang"] = s_lang
         if sub_extra_lang:
