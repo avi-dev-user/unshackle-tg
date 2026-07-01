@@ -285,13 +285,15 @@ async def start_download(chat: int, uid: int, mid: int, profile: str):
             s["dl_profile"] = profile
             if delivery_mode == "ask":
                 rows = [[(tr("DELIVER_TELEGRAM", lang), "predlv:t"),
-                         (tr("DELIVER_LINK", lang), "predlv:l")]]
+                         (tr("DELIVER_LINK", lang), "predlv:l")],
+                        [(tr("DELIVER_GOFILE", lang), "predlv:g")]]
                 return await edit(chat, mid, f"🎬 {head_name}\n📦 " + tr("ASK_DELIVERY", lang), rows)
             s["delivery_link"] = delivery_mode == "link"
+            s["gofile_only"] = False
             s["_preflight_delivery_done"] = True
-        if s.get("delivery_link"):
+        if s.get("delivery_link") or s.get("gofile_only"):
             s["_preflight_gofile_done"] = True
-            s["gofile"] = False
+            s["gofile"] = bool(s.get("gofile_only"))
         elif not s.get("_preflight_gofile_done"):
             gofile_mode = users.gofile_mode(uid)
             s["dl_profile"] = profile
@@ -303,6 +305,7 @@ async def start_download(chat: int, uid: int, mid: int, profile: str):
             s["_preflight_gofile_done"] = True
     delivery_link = bool(s.get("delivery_link")) if not keys_only else False
     gofile_choice = bool(s.get("gofile")) if not keys_only else False
+    gofile_only = bool(s.get("gofile_only")) if not keys_only else False
     flags, q = build_flags(uid, s["service"], profile, s.get("tsel"), s.get("quality"),
                            s.get("s_lang"), s.get("sub_extra_lang"), s.get("cdm"), a_lang=s.get("a_lang"),
                            keys_only=keys_only)
@@ -317,8 +320,10 @@ async def start_download(chat: int, uid: int, mid: int, profile: str):
                           source_media=s.get("source_media", ""),
                           description=s.get("description", ""), upload_date=s.get("upload_date", ""),
                           cover_url=s.get("cover_url", ""), keys_only=keys_only,
-                          delivery_link=delivery_link, gofile_upload=gofile_choice)
-    for k in ("_preflight_delivery_done", "_preflight_gofile_done", "delivery_link", "gofile"):
+                          delivery_link=delivery_link, gofile_upload=gofile_choice,
+                          gofile_only=gofile_only)
+    for k in ("_preflight_delivery_done", "_preflight_gofile_done", "delivery_link", "gofile",
+              "gofile_only"):
         s.pop(k, None)
 
 
@@ -352,7 +357,7 @@ async def launch_download(chat: int, uid: int, mid: int, *, service, title_id, p
                           quality, flags, name, src_url=None, source_media="", retried=False,
                           send_as=None, cover=None, is_monitor=False, gate=True,
                           description="", upload_date="", cover_url="", keys_only=False,
-                          delivery_link=None, gofile_upload=None):
+                          delivery_link=None, gofile_upload=None, gofile_only=None):
     """Submit a download to the engine and start polling it. The single submit seam shared by
     the wizard and the auto-monitor: validates the profile, atomically reserves a concurrency
     slot (gate=True), and carries a dl_spec for the geofence proxy retry (which passes gate=False
@@ -378,7 +383,7 @@ async def launch_download(chat: int, uid: int, mid: int, *, service, title_id, p
                                source_media=source_media, send_as=send_as, cover=cover,
                                description=description, upload_date=upload_date, cover_url=cover_url,
                                keys_only=keys_only, delivery_link=delivery_link,
-                               gofile_upload=gofile_upload)
+                               gofile_upload=gofile_upload, gofile_only=gofile_only)
     jobs = active_jobs.setdefault(uid, {})
     resv = None
     if gate:                                       # atomic check + reserve, no await in between
@@ -406,7 +411,7 @@ async def launch_download(chat: int, uid: int, mid: int, *, service, title_id, p
                 "send_as": send_as, "cover": cover, "is_monitor": is_monitor,
                 "description": description, "upload_date": upload_date, "cover_url": cover_url,
                 "keys_only": keys_only, "delivery_link": delivery_link,
-                "gofile_upload": gofile_upload}
+                "gofile_upload": gofile_upload, "gofile_only": gofile_only}
         asyncio.create_task(poll_job(chat, uid, mid, job_id, outdir, src_url=src_url,
                                      source_media=source_media, dl_spec=spec, is_monitor=is_monitor))
     finally:
@@ -524,7 +529,8 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                     gate=False, description=dl_spec.get("description", ""),
                     upload_date=dl_spec.get("upload_date", ""), cover_url=dl_spec.get("cover_url", ""),
                     delivery_link=dl_spec.get("delivery_link"),
-                    gofile_upload=dl_spec.get("gofile_upload"))
+                    gofile_upload=dl_spec.get("gofile_upload"),
+                    gofile_only=dl_spec.get("gofile_only"))
             elif (now - stall["t"] > PROXY_STALL_SECS and prog < 50 and dl_spec
                   and not dl_spec.get("keys_only")
                   and not dl_spec["flags"].get("no_proxy_download")):
@@ -590,7 +596,10 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
             # Optional extra: publish the whole job (all files) into ONE gofile folder -> one link.
             # Honours the user's ask/always/never setting; an over-cap file forces it on (no TG path).
             has_big = any(os.path.getsize(f) > uploader.max_cap() for f in files if os.path.exists(f))
+            gofile_only = bool(dl_spec and dl_spec.get("gofile_only"))
             if has_big:
+                want_gf = True
+            elif gofile_only:
                 want_gf = True
             elif dl_spec and dl_spec.get("gofile_upload") is not None:
                 want_gf = bool(dl_spec.get("gofile_upload"))
@@ -606,7 +615,7 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                 count = f" {idx}/{total}" if total > 1 else ""
                 head = f"🎬 {head_name}\n⬆️ " + tr("UPLOADING", lang) + f"{count}\n<code>{fname}</code>"
                 await edit(chat, mid, _render_progress(head=head, pct=0))
-                seen = {"p": -10, "t": 0.0, "t0": time.time()}
+                seen = {"p": -10, "t": 0.0, "t0": time.time(), "cur": 0, "tot": 0, "spd": 0}
 
                 async def on_up(cur, tot, _head=head):           # real-time upload progress
                     pct = int(cur * 100 / tot) if tot else 0
@@ -616,6 +625,7 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                         seen["p"], seen["t"] = pct, now
                         el = now - seen["t0"]
                         spd = cur / el if el > 0 else 0
+                        seen.update(cur=cur, tot=tot, spd=spd)
                         eta = tr("LEFT", lang).format(t=_fmt_eta((tot - cur) / spd, lang)) \
                             if (spd > 0 and tot) else ""
                         try:
@@ -626,7 +636,11 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
 
                 async def on_phase(_head=head):                  # Bot API: localhost buffer done,
                     try:                                         # the real upload to Telegram begins
-                        await edit(chat, mid, f"{_head}\n⏳ " + tr("UPLOADING_TO_TELEGRAM", lang),
+                        tot = seen.get("tot") or (os.path.getsize(path) if os.path.exists(path) else 0)
+                        line = _render_progress(
+                            head=_head, pct=100, done_b=tot, total_b=tot,
+                            speed_bps=seen.get("spd") or None)
+                        await edit(chat, mid, f"{line}\n⏳ " + tr("UPLOADING_TO_TELEGRAM", lang),
                                    [[(tr("CANCEL_3", lang), f"cxl:{job_id}")]])
                     except Exception:
                         pass
@@ -649,7 +663,7 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                                              f"file too large for Telegram and gofile upload failed: {ge}",
                                              allow_retry=not is_monitor)
                             return
-                if too_big:                                      # delivered via the gofile link only
+                if too_big or gofile_only:                       # delivered via the gofile link only
                     try:
                         os.remove(path)
                     except OSError:
@@ -676,8 +690,11 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
             if gf_sess:
                 await gf_sess.aclose()
             shutil.rmtree(outdir, ignore_errors=True)   # remove the now-empty job dir
-            msg = ("🎉 " + tr("SENT_FILES", lang).format(total=total)) if total > 1 \
-                else "🎉 " + tr("SENT", lang)
+            if gofile_only:
+                msg = "✅ " + tr("GOFILE_READY", lang)
+            else:
+                msg = ("🎉 " + tr("SENT_FILES", lang).format(total=total)) if total > 1 \
+                    else "🎉 " + tr("SENT", lang)
             stats = []                                   # a small closing line: total size + elapsed
             if total_bytes:
                 stats.append(f"💾 {_fmt_size(total_bytes)}")
@@ -721,7 +738,8 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                     upload_date=dl_spec.get("upload_date", ""), cover_url=dl_spec.get("cover_url", ""),
                     keys_only=dl_spec.get("keys_only", False),
                     delivery_link=dl_spec.get("delivery_link"),
-                    gofile_upload=dl_spec.get("gofile_upload"))
+                    gofile_upload=dl_spec.get("gofile_upload"),
+                    gofile_only=dl_spec.get("gofile_only"))
             await user_error(chat, mid, uid, detail, allow_retry=not is_monitor)
             return
     shutil.rmtree(outdir, ignore_errors=True)

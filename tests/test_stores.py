@@ -133,8 +133,8 @@ def test_default_credential_resolves_only_for_default_profile():
 def test_delivery_mode_default_and_set():
     u = users.add("810810", by=1, ts=0)
     uid = u["id"]
-    assert users.delivery_mode(uid) == "telegram"            # default: keep uploading to Telegram
-    assert users.delivery_mode(999998) == "telegram"         # unknown user -> safe default
+    assert users.delivery_mode(uid) == "ask"                 # default: prompt each download
+    assert users.delivery_mode(999998) == "ask"              # unknown user -> safe default
     users.set_delivery_mode(uid, "link")
     assert users.delivery_mode(uid) == "link"
     users.set_delivery_mode(uid, "ask")

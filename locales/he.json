@@ -360,6 +360,7 @@
   "ASK_DELIVERY": "איך תרצה לקבל את ההורדה?",
   "DELIVER_TELEGRAM": "📤 טלגרם",
   "DELIVER_LINK": "🔗 קישור הורדה",
+  "DELIVER_GOFILE": "☁️ Gofile",
   "LINK_READY": "מוכן - קישור הורדה:",
   "GOFILE_MODE_ASK": "לשאול כל פעם",
   "GOFILE_MODE_ALWAYS": "תמיד",
