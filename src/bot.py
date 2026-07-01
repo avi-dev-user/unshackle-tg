@@ -32,7 +32,7 @@ from .menus import (_after_account, _search_labels, account_service, accounts_me
                     continue_after_track_types, settings_menu, service_detail, services_grid,
                     show_audio_langs, show_dl_cover, show_episodes,
                     show_gofile_folder, show_quality, show_search_results, show_send_as, show_sub_langs,
-                    show_titles, show_track_types, show_tracks, tag_menu, ask_tag)
+                    show_titles, show_track_types, show_tracks, show_video_codecs, tag_menu, ask_tag)
 from .monitors_ui import (_mon_iv, _mon_last, _parse_interval, _parse_schedule, _save_monitor,
                           _schedule_label, monitor_ask_cover, monitor_ask_interval,
                           monitor_ask_sendas, monitor_ask_start, monitor_ask_tracks,
@@ -502,6 +502,8 @@ async def on_callback(cq: dict):
             return await show_track_types(chat, uid, mid)   # nothing checked → re-show
         s["send_as"] = None
         s["a_lang"] = None                                  # fresh audio-language choice per title
+        s["vcodec"] = None
+        s["_vcodec_chosen"] = False
         s["_sub_lang_chosen"] = False
         if not s.get("keys_only") and "audio" in sel and len(s.get("audio_langs") or []) > 1:
             return await show_audio_langs(chat, uid, mid)   # several audio languages → let user pick
@@ -509,6 +511,11 @@ async def on_callback(cq: dict):
     if data.startswith("al:"):                              # chosen audio language ("all" = keep every language)
         choice = data.split(":", 1)[1]
         sess(uid)["a_lang"] = ["all"] if choice == "all" else [choice]
+        return await continue_after_track_types(chat, uid, mid)
+    if data.startswith("vc:"):                              # chosen video codec ("all" = let engine choose)
+        choice = data.split(":", 1)[1]
+        sess(uid)["vcodec"] = None if choice == "all" else [choice]
+        sess(uid)["_vcodec_chosen"] = True
         return await continue_after_track_types(chat, uid, mid)
     if data == "slother":
         sess(uid).update(step="await_sublang", mode="subs")

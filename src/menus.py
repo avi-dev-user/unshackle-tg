@@ -378,6 +378,12 @@ async def show_tracks(chat: int, uid: int, mid: int, wanted):
         return await user_error(chat, mid, uid, e)
     videos = tracks.get("video", []) if isinstance(tracks, dict) else []
     s["heights"] = sorted({v["height"] for v in videos if v.get("height")}, reverse=True)
+    vcodecs = {}
+    for v in videos:
+        codec = (v.get("codec") or "").strip()
+        if codec:
+            vcodecs[codec] = v.get("codec_display") or codec
+    s["video_codecs"] = [{"codec": c, "label": label} for c, label in sorted(vcodecs.items(), key=lambda x: x[1])]
     # per resolution: the richest variant (highest bitrate) - codec / dynamic-range / bitrate for the
     # quality picker, so the choice isn't blind. All real values straight from the engine.
     vinfo = {}
@@ -506,6 +512,18 @@ async def show_quality(chat: int, uid: int, mid: int):
     await edit(chat, mid, f"{_wiz_head(s, lang)}\n" + tr("PICK_QUALITY", lang), rows)
 
 
+async def show_video_codecs(chat: int, uid: int, mid: int):
+    """Pick a video codec only when the manifest actually exposes several codecs."""
+    s = sess(uid)
+    lang = users.lang(uid)
+    codecs = s.get("video_codecs") or []
+    rows = [[(c.get("label") or c.get("codec") or "?", f"vc:{c.get('codec')}")]
+            for c in codecs if c.get("codec")]
+    rows.append([(tr("ALL_CODECS", lang), "vc:all")])
+    rows.append([(tr("BACK", lang), "tt:back")])
+    await edit(chat, mid, f"{_wiz_head(s, lang)}\n" + tr("PICK_VIDEO_CODEC", lang), rows)
+
+
 async def show_send_as(chat: int, uid: int, mid: int):
     """Choose how the video is delivered to Telegram: as a streamable video, or as a file."""
     lang = users.lang(uid)
@@ -589,6 +607,9 @@ async def continue_after_track_types(chat: int, uid: int, mid: int):
     if "subs" in sel and len(s.get("sub_langs") or []) > 1 and not s.get("_sub_lang_chosen"):
         s["s_lang"] = None
         return await show_sub_langs(chat, uid, mid)
+    if ("video" in sel and len(s.get("video_codecs") or []) > 1
+            and not s.get("_vcodec_chosen")):
+        return await show_video_codecs(chat, uid, mid)
     if "video" in sel:                                  # video -> choose quality, then send-as
         return await show_quality(chat, uid, mid)
     return await pick_account_or_go(chat, uid, mid, "best")   # no video -> no resolution

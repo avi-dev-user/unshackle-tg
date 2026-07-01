@@ -325,7 +325,8 @@ def sel_label(val, lang: str = "en") -> str:
 
 
 def build_flags(uid: int, service: str, profile: str, sel, quality,
-                s_lang=None, sub_extra_lang=None, cdm=None, a_lang=None, keys_only=False):
+                s_lang=None, sub_extra_lang=None, cdm=None, a_lang=None,
+                vcodec=None, keys_only=False):
     """Build the unshackle download flags + quality list for a track selection (any combo of
     video/audio/subs). Shared by the wizard (start_download) and the auto-monitor.
 
@@ -353,6 +354,8 @@ def build_flags(uid: int, service: str, profile: str, sel, quality,
             flags["sub_lang"] = sub_extra_lang
     if a_lang and "audio" in sel:          # chosen audio language(s); ["all"] keeps every language
         flags["a_lang"] = a_lang
+    if vcodec and "video" in sel:          # chosen video codec(s); None lets the engine choose
+        flags["vcodec"] = vcodec
     cred = auth.get_credential(uid, service, profile)   # user:pass account → credential
     if cred:
         flags["credential"] = cred
@@ -425,7 +428,7 @@ async def start_download(chat: int, uid: int, mid: int, profile: str):
     gofile_only = bool(s.get("gofile_only")) if not keys_only else False
     flags, q = build_flags(uid, s["service"], profile, s.get("tsel"), s.get("quality"),
                            s.get("s_lang"), s.get("sub_extra_lang"), s.get("cdm"), a_lang=s.get("a_lang"),
-                           keys_only=keys_only)
+                           vcodec=s.get("vcodec"), keys_only=keys_only)
     await edit(chat, mid, ("🔑 " + tr("KEYS_EXTRACTING", lang)) if keys_only
                else "⏳ " + tr("STARTING_DOWNLOAD", lang))
     users.note_recent(uid, s["service"])           # remember for the 🕘 אחרונים tab
@@ -440,7 +443,7 @@ async def start_download(chat: int, uid: int, mid: int, profile: str):
                           delivery_link=delivery_link, gofile_upload=gofile_choice,
                           gofile_only=gofile_only)
     for k in ("_preflight_delivery_done", "_preflight_gofile_done", "_preflight_sendas_done",
-              "_sub_lang_chosen", "delivery_link", "gofile", "gofile_only"):
+              "_sub_lang_chosen", "_vcodec_chosen", "delivery_link", "gofile", "gofile_only", "vcodec"):
         s.pop(k, None)
 
 
