@@ -17,7 +17,7 @@ def _friendly(err: str, lang="en") -> str:
     # access/entitlement: the account simply isn't subscribed to this title (e.g. Cellcom NotEntitled).
     # A distinct, honest message - not a generic "error, try again" that hides the real reason.
     if any(k in e for k in ("not entitled", "notentitled", "no playable sources", "not subscribed",
-                            "subscription", "entitlement")):
+                            "subscription", "entitlement", "חשבון לא זכאי")):
         return tr("CONTENT_NOT_IN_YOUR_PLAN", lang)
     if any(k in e for k in ("sign in to confirm", "not a bot", "--cookies", "cookies-from-browser",
                             "login required", "authenticat", "needs auth")):
@@ -54,20 +54,33 @@ def _req_ctx(uid) -> str:
     return ("\n" + "\n".join(lines)) if lines else ""
 
 
+# Expected user-side conditions: the account or region simply isn't eligible.
+# These are not bugs - don't flood the admin channel with them.
+_ENTITLEMENT_KEYWORDS = (
+    "not entitled", "notentitled", "no playable sources", "not subscribed",
+    "subscription", "entitlement", "חשבון לא זכאי",
+)
+
+
 async def user_error(chat: int, mid: int, uid, e, back=None, allow_retry: bool = False) -> None:
     """User sees a friendly message; the admin gets the full technical detail + who.
     allow_retry: offer a one-tap 🔁 retry when the failure looks transient (rate-limit, network,
     timeout, or generic) - i.e. cases where re-running the same request might just work. Errors
-    with a more specific remedy (login/CDM/geo/premium) get that action instead, not a retry."""
+    with a more specific remedy (login/CDM/geo/premium) get that action instead, not a retry.
+    Entitlement/subscription errors are silenced from admin - they are expected user-side
+    conditions (account not subscribed to this title), not actionable bugs."""
     lang = users.lang(uid)
     msg = str(e)
+    low = msg.lower()
+    is_entitlement = any(k in low for k in _ENTITLEMENT_KEYWORDS)
     ctx = _req_ctx(uid)                            # service / link / title - so the admin can debug
-    for admin in config.ADMIN_IDS:
-        try:
-            await call("sendMessage", chat_id=admin, parse_mode="HTML", disable_web_page_preview=True,
-                       text=f"⚠️ <b>User error</b>\n{_admin_actor(uid)}{ctx}\n<code>{html.escape(msg[:1800])}</code>")
-        except Exception:
-            pass
+    if not is_entitlement:
+        for admin in config.ADMIN_IDS:
+            try:
+                await call("sendMessage", chat_id=admin, parse_mode="HTML", disable_web_page_preview=True,
+                           text=f"⚠️ <b>User error</b>\n{_admin_actor(uid)}{ctx}\n<code>{html.escape(msg[:1800])}</code>")
+            except Exception:
+                pass
     print(f"[user_error] uid={uid}: {msg[:200]}")
     if back is None:
         back = (tr("MENU", lang), "m:main")

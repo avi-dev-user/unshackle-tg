@@ -634,10 +634,16 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
             shutil.rmtree(outdir, ignore_errors=True)
             if _cancelled():                         # cancelled - don't retry, don't error
                 return
-            # Graceful fallback: a geofenced service tried a direct (no-proxy) download. If it
-            # failed (e.g. geo-locked segments), retry once through the proxy instead of erroring.
+            detail = " | ".join(str(x) for x in (j.get("error"), j.get("worker_stderr"),
+                                                 j.get("message")) if x) or "download failed"
+            # Graceful fallback: a direct (no-proxy) download failed. Retry once through the proxy.
+            # Two triggers: (a) service is formally declared geofenced in the engine metadata,
+            # (b) the failure is a network/timeout error - likely geo-locked segments even if the
+            # service isn't explicitly marked (e.g. yesplus CDN timing out from a foreign IP).
+            is_net_err = any(k in detail.lower() for k in
+                             ("timed out", "timeout", "connection", "network error", "resolve host", "unreachable"))
             if (dl_spec and not dl_spec.get("retried") and dl_spec["flags"].get("no_proxy_download")
-                    and state.meta(dl_spec["service"]).get("geofence")):
+                    and (state.meta(dl_spec["service"]).get("geofence") or is_net_err)):
                 await edit(chat, mid, f"🎬 {head_name}\n⏳ "
                            + tr("SWITCHING_TO_DOWNLOAD_VIA", lang),
                            [[(tr("CANCEL_3", lang), f"cxl:{job_id}")]])
@@ -650,10 +656,7 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                     gate=False, description=dl_spec.get("description", ""),   # continues the slot, don't re-gate
                     upload_date=dl_spec.get("upload_date", ""), cover_url=dl_spec.get("cover_url", ""),
                     keys_only=dl_spec.get("keys_only", False))
-            detail = " | ".join(str(x) for x in (j.get("error"), j.get("worker_stderr"),
-                                                 j.get("message")) if x) or "download failed"
             await user_error(chat, mid, uid, detail, allow_retry=not is_monitor)
             return
-    # loop exhausted without a terminal status (engine stuck) - clean up and tell the user
     shutil.rmtree(outdir, ignore_errors=True)
     await user_error(chat, mid, uid, "the download did not finish in time", allow_retry=not is_monitor)
