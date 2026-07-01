@@ -48,7 +48,7 @@ def answer_gofile_ask(job_id: str, yes: bool) -> None:
 # upload). Reuses the same dir + URL base as live recordings, so the existing cleanup CronJob
 # expires these too. Same /data filesystem as the job out dir -> publishing is an instant move.
 REC_DIR = os.environ.get("REC_DIR", "/data/recordings")
-REC_URL_BASE = os.environ.get("REC_URL_BASE", "https://rec.avidev.net").rstrip("/")
+REC_URL_BASE = os.environ.get("REC_URL_BASE", "").rstrip("/")
 
 # job_id -> Event/answer for the "Telegram or link?" prompt in delivery 'ask' mode (see _gfask).
 _lnk: dict[str, asyncio.Event] = {}
@@ -90,6 +90,8 @@ async def _decide_link(chat: int, uid: int, mid: int, job_id: str, head_name: st
 def publish_link(files: list[str]) -> list[str]:
     """Move the job's files into one fresh token dir under REC_DIR (nginx-served) and return
     their public URLs. The move is same-filesystem (instant) since out and REC_DIR share /data."""
+    if not REC_URL_BASE:
+        return []
     token = secrets.token_urlsafe(18)
     dest_dir = os.path.join(REC_DIR, token)
     os.makedirs(dest_dir, exist_ok=True)
