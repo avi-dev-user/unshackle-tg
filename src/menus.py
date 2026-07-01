@@ -97,9 +97,12 @@ async def settings_menu(chat: int, uid: int, mid: int):
     mode_label = tr(f"GOFILE_MODE_{mode.upper()}", lang)
     dmode = users.delivery_mode(uid)
     dmode_label = tr(f"DELIVERY_MODE_{dmode.upper()}", lang)
+    svc_view = users.service_view_mode(uid)
+    svc_view_label = tr(f"SERVICE_VIEW_{svc_view.upper()}", lang)
     tag = users.tag_pref(uid)
     rows = [
         [(f"🌐 {tr('LANGUAGE', lang)}: {cur_lang}", "m:lang")],
+        [(f"🧭 {tr('SERVICE_VIEW_SETTING', lang)}: {svc_view_label}", "m:svview")],
         [(f"📦 {tr('DELIVERY_SETTING', lang)}: {dmode_label}", "m:dmode")],
         [(f"☁️ {tr('GOFILE_SETTING', lang)}: {mode_label}", "m:gfmode")],
         [(f"🏷️ {tr('TAG_SETTING', lang)}: {tag or tr('TAG_NONE', lang)}", "m:tag")],
@@ -146,6 +149,16 @@ async def delivery_mode_menu(chat: int, uid: int, mid: int):
     await edit(chat, mid, f"📦 {tr('DELIVERY_SETTING_EXPLAIN', lang)}", rows)
 
 
+async def service_view_menu(chat: int, uid: int, mid: int):
+    """Pick whether service lists show only usable services or every permitted service."""
+    lang = users.lang(uid)
+    cur = users.service_view_mode(uid)
+    rows = [[(("✅ " if m == cur else "") + tr(f"SERVICE_VIEW_{m.upper()}", lang), f"svview:{m}")]
+            for m in users.SERVICE_VIEW_MODES]
+    rows.append([(tr("BACK", lang), "m:settings")])
+    await edit(chat, mid, f"🧭 {tr('SERVICE_VIEW_SETTING_EXPLAIN', lang)}", rows)
+
+
 async def language_menu(chat: int, uid: int, mid: int):
     """Per-user UI language switch (English default)."""
     lang = users.lang(uid)
@@ -158,9 +171,16 @@ async def picker(chat: int, uid: int, mid: int, cat: str, page: int, search: boo
     await state.services()
     lang = users.lang(uid)
 
+    def has_account_or_default(t: str) -> bool:
+        return bool(auth.list_accounts(uid, t) or auth.has_default_cookies(t) or auth.has_default_credential(t))
+
     def usable(t: str) -> bool:
         # in search mode only show services that actually support search()
-        return can_use(uid, t) and (not search or state.meta(t).get("has_search"))
+        if not (can_use(uid, t) and (not search or state.meta(t).get("has_search"))):
+            return False
+        if users.service_view_mode(uid) == "all":
+            return True
+        return (not svc_auth_required(t)) or has_account_or_default(t)
 
     if cat == "recent":
         tags = {s["tag"] for s in state.services_cached()}
@@ -202,7 +222,10 @@ async def picker(chat: int, uid: int, mid: int, cat: str, page: int, search: boo
         badge = "🔐" if svc_needs_auth(t) else "🔓"
         head = f'<a href="{link}">{t}</a>' if link else f"<b>{t}</b>"
         lines.append(f"{badge} {head} - {desc}" if desc else f"{badge} {head}")
-    lines.append("\n" + tr("NEEDS_AN_ACCOUNT_FREE", lang))
+    if users.service_view_mode(uid) == "available":
+        lines.append("\n" + tr("SERVICE_VIEW_AVAILABLE_HINT", lang))
+    else:
+        lines.append("\n" + tr("NEEDS_AN_ACCOUNT_FREE", lang))
     await edit(chat, mid, "\n".join(lines), rows)
 
 
@@ -625,7 +648,12 @@ async def pick_account_or_go(chat: int, uid: int, mid: int, quality):
         rows = [[(a["label"], f"use:{a['profile']}")] for a in accounts]
         rows.append([(tr("MENU", lang), "m:main")])
         return await edit(chat, mid, tr("WHICH_ACCOUNT_SHOULD_USE", lang), rows)
-    profile = accounts[0]["profile"] if accounts else str(uid)  # default profile = own id
+    if accounts:
+        profile = accounts[0]["profile"]
+    elif auth.has_default_cookies(s["service"]) or auth.has_default_credential(s["service"]):
+        profile = auth.DEFAULT_PROFILE
+    else:
+        profile = str(uid)  # default profile = own id
     await _after_account(chat, uid, mid, profile)
 
 

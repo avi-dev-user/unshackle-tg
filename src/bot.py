@@ -29,7 +29,7 @@ from .menus import (_after_account, _search_labels, account_service, accounts_me
                     delivery_mode_menu, gofile_mode_menu, language_menu, main_menu, my_downloads,
                     pick_account_or_go, picker,
                     _ready_to_start,
-                    continue_after_track_types, settings_menu, service_detail, services_grid,
+                    continue_after_track_types, service_view_menu, settings_menu, service_detail, services_grid,
                     show_audio_langs, show_dl_cover, show_episodes,
                     show_gofile_folder, show_quality, show_search_results, show_send_as, show_sub_langs,
                     show_titles, show_track_types, show_tracks, show_video_codecs, tag_menu, ask_tag)
@@ -133,6 +133,11 @@ async def on_callback(cq: dict):
     if data.startswith("dmode:"):
         users.set_delivery_mode(uid, data.split(":", 1)[1])
         return await delivery_mode_menu(chat, uid, mid)
+    if data == "m:svview":
+        return await service_view_menu(chat, uid, mid)
+    if data.startswith("svview:"):
+        users.set_service_view_mode(uid, data.split(":", 1)[1])
+        return await service_view_menu(chat, uid, mid)
     if data == "m:tag":
         return await tag_menu(chat, uid, mid)
     if data == "tagset":
