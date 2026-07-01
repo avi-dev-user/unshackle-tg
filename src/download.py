@@ -323,8 +323,8 @@ async def start_download(chat: int, uid: int, mid: int, profile: str):
                           cover_url=s.get("cover_url", ""), keys_only=keys_only,
                           delivery_link=delivery_link, gofile_upload=gofile_choice,
                           gofile_only=gofile_only)
-    for k in ("_preflight_delivery_done", "_preflight_gofile_done", "delivery_link", "gofile",
-              "gofile_only"):
+    for k in ("_preflight_delivery_done", "_preflight_gofile_done", "_preflight_sendas_done",
+              "_sub_lang_chosen", "delivery_link", "gofile", "gofile_only"):
         s.pop(k, None)
 
 

@@ -28,6 +28,7 @@ from .keepalive import keepalive_loop
 from .menus import (_after_account, _search_labels, account_service, accounts_menu, ask_input, cdm_menu,
                     delivery_mode_menu, gofile_mode_menu, language_menu, main_menu, my_downloads,
                     pick_account_or_go, picker,
+                    _ready_to_start,
                     continue_after_track_types, settings_menu, service_detail, services_grid,
                     show_audio_langs, show_dl_cover, show_episodes,
                     show_gofile_folder, show_quality, show_search_results, show_send_as, show_sub_langs,
@@ -150,7 +151,12 @@ async def on_callback(cq: dict):
         sess(uid)["delivery_link"] = choice == "l"
         sess(uid)["gofile_only"] = choice == "g"
         sess(uid)["gofile"] = choice == "g"
+        if choice == "t":
+            sess(uid)["gofile"] = False
+            sess(uid)["_preflight_gofile_done"] = True
         sess(uid)["_preflight_delivery_done"] = True
+        if choice == "t" and "video" in to_sel(sess(uid).get("tsel")):
+            return await show_send_as(chat, uid, mid)
         return await start_download(chat, uid, mid, sess(uid).get("dl_profile", str(uid)))
     if data.startswith("pregf:"):                     # pre-download "also upload to gofile?" choice
         sess(uid)["gofile"] = data.rsplit(":", 1)[1] == "y"
@@ -371,7 +377,7 @@ async def on_callback(cq: dict):
         choice = data.split(":", 1)[1]
         s = sess(uid)
         s["cdm"] = "" if choice == "_default" else (auth.wvd_device(uid, choice) or "")
-        return await start_download(chat, uid, mid, s.get("dl_profile", str(uid)))
+        return await _ready_to_start(chat, uid, mid, s.get("dl_profile", str(uid)))
     if data == "svc:refresh" and users.is_admin(uid):
         await state.refresh()
         return await services_grid(chat, uid, mid, "il", 0)
@@ -496,6 +502,7 @@ async def on_callback(cq: dict):
             return await show_track_types(chat, uid, mid)   # nothing checked → re-show
         s["send_as"] = None
         s["a_lang"] = None                                  # fresh audio-language choice per title
+        s["_sub_lang_chosen"] = False
         if not s.get("keys_only") and "audio" in sel and len(s.get("audio_langs") or []) > 1:
             return await show_audio_langs(chat, uid, mid)   # several audio languages → let user pick
         return await continue_after_track_types(chat, uid, mid)
@@ -510,18 +517,18 @@ async def on_callback(cq: dict):
         choice = data.split(":", 1)[1]
         sess(uid)["s_lang"] = None if choice == "all" else [choice]
         sess(uid)["sub_extra_lang"] = None
-        return await pick_account_or_go(chat, uid, mid, "best")
+        sess(uid)["_sub_lang_chosen"] = True
+        return await continue_after_track_types(chat, uid, mid)
     if data.startswith("q:"):
         sess(uid)["quality"] = data.split(":", 1)[1]
-        if "video" in to_sel(sess(uid).get("tsel")):         # video selected → 🎬 video vs 📄 file
-            return await show_send_as(chat, uid, mid)
         return await pick_account_or_go(chat, uid, mid, sess(uid)["quality"])
     if data.startswith("sa:"):
         sess(uid)["send_as"] = data.split(":", 1)[1]         # "video" | "file"
         return await show_dl_cover(chat, uid, mid)
     if data == "dlcov:auto":
         sess(uid)["cover"] = None
-        return await pick_account_or_go(chat, uid, mid, sess(uid).get("quality", "best"))
+        sess(uid)["_preflight_sendas_done"] = True
+        return await start_download(chat, uid, mid, sess(uid).get("dl_profile", str(uid)))
     if data == "dlcov:up":
         sess(uid)["step"] = "await_dl_cover"
         return await edit(chat, mid, tr("SEND_PHOTO_NOW_AS_2", lang),
@@ -1013,8 +1020,9 @@ async def on_message(msg: dict):
             s["cover"] = cov_path
         except Exception:
             s["cover"] = None
+        s["_preflight_sendas_done"] = True
         m = await send(chat, tr("PHOTO_SAVED", lang) if s.get("cover") else tr("COULD_NOT_SAVE_IT", lang))
-        return await pick_account_or_go(chat, uid, m["result"]["message_id"], s.get("quality", "best"))
+        return await start_download(chat, uid, m["result"]["message_id"], s.get("dl_profile", str(uid)))
     if s.get("step") == "await_mon_cover" and msg.get("photo"):   # fixed cover for a monitor
         s["step"] = None
         if s.get("mon_pending") is None:
@@ -1114,8 +1122,9 @@ async def on_message(msg: dict):
         s["step"] = None
         s["s_lang"] = [code]
         s["sub_extra_lang"] = code
+        s["_sub_lang_chosen"] = True
         m = await send(chat, "⏳...")
-        return await pick_account_or_go(chat, uid, m["result"]["message_id"], "best")
+        return await continue_after_track_types(chat, uid, m["result"]["message_id"])
     if s.get("step") == "await_tag" and text:        # user typed their group tag
         s["step"] = None
         saved = users.set_tag_pref(uid, text)

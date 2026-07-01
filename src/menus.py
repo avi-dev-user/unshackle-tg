@@ -586,12 +586,11 @@ async def continue_after_track_types(chat: int, uid: int, mid: int):
     sel = set(s.get("tsel") or [])
     if s.get("keys_only"):                              # keys only -> no quality/send-as, just license
         return await pick_account_or_go(chat, uid, mid, "best")
+    if "subs" in sel and len(s.get("sub_langs") or []) > 1 and not s.get("_sub_lang_chosen"):
+        s["s_lang"] = None
+        return await show_sub_langs(chat, uid, mid)
     if "video" in sel:                                  # video -> choose quality, then send-as
         return await show_quality(chat, uid, mid)
-    if sel == {"subs"}:                                 # subtitles only -> maybe pick a language
-        s["s_lang"] = None
-        if len(s.get("sub_langs") or []) > 1:
-            return await show_sub_langs(chat, uid, mid)
     return await pick_account_or_go(chat, uid, mid, "best")   # no video -> no resolution
 
 
@@ -609,6 +608,22 @@ async def pick_account_or_go(chat: int, uid: int, mid: int, quality):
     await _after_account(chat, uid, mid, profile)
 
 
+async def _ready_to_start(chat: int, uid: int, mid: int, profile: str):
+    """After account/CDM is resolved, ask Telegram-only delivery options if needed."""
+    s = sess(uid)
+    s["dl_profile"] = profile
+    if (users.delivery_mode(uid) == "telegram"
+            and "video" in to_sel(s.get("tsel"))
+            and not s.get("_preflight_sendas_done")):
+        s["_preflight_delivery_done"] = True
+        s["_preflight_gofile_done"] = True
+        s["delivery_link"] = False
+        s["gofile_only"] = False
+        s["gofile"] = False
+        return await show_send_as(chat, uid, mid)
+    return await start_download(chat, uid, mid, profile)
+
+
 async def _after_account(chat: int, uid: int, mid: int, profile: str):
     """For DRM services, resolve which CDM to use (own wvd / shared default / blocked)
     before downloading. Non-DRM services skip straight to the download."""
@@ -616,13 +631,13 @@ async def _after_account(chat: int, uid: int, mid: int, profile: str):
     lang = users.lang(uid)
     s["cdm"] = None
     if to_sel(s.get("tsel")) == {"subs"}:                          # clear subtitles → never need a CDM
-        return await start_download(chat, uid, mid, profile)
+        return await _ready_to_start(chat, uid, mid, profile)
     if not state.meta(s["service"]).get("has_drm"):
-        return await start_download(chat, uid, mid, profile)        # no CDM needed
+        return await _ready_to_start(chat, uid, mid, profile)        # no CDM needed
     wvds = auth.list_wvd(uid)
     if len(wvds) == 1:
         s["cdm"] = wvds[0]["device"]
-        return await start_download(chat, uid, mid, profile)
+        return await _ready_to_start(chat, uid, mid, profile)
     if len(wvds) > 1:                                               # let the user pick a CDM
         s["dl_profile"] = profile
         rows = [[(f"🔑 {w['label']}", f"cdm:{w['profile']}")] for w in wvds]
@@ -633,7 +648,7 @@ async def _after_account(chat: int, uid: int, mid: int, profile: str):
     # no personal wvd
     if users.can_use_default_cdm(uid):
         s["cdm"] = ""                                              # engine uses the shared default
-        return await start_download(chat, uid, mid, profile)
+        return await _ready_to_start(chat, uid, mid, profile)
     return await edit(chat, mid, tr("THIS_SERVICE_REQUIRES_CDM", lang),
                       [[(tr("MENU", lang), "m:main")]])
 
