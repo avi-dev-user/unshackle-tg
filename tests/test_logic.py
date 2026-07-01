@@ -63,6 +63,10 @@ def test_build_flags_combinations():
     assert q == [1080] and "no_video" not in f
     assert f["no_proxy_download"] and f["skip_subtitle_errors"]   # always set
 
+    f, q = download.build_flags(0, "SVC", "0", ["video", "audio", "subs"], "1080")
+    assert q == [1080] and f["sub_format"] == "SRT"
+    assert "no_subs" not in f and "no_mux" not in f
+
     f, q = download.build_flags(0, "SVC", "0", ["video"], "best")
     assert q is None                                             # 'best' -> no explicit quality
 
