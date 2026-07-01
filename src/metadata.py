@@ -180,6 +180,62 @@ def _stream_langs(info: dict, codec_type: str) -> list:
     return langs
 
 
+def media_details_block(path: str, lang: str = "en") -> str:
+    """Return the expandable technical-details block used in media captions."""
+    info = _ffprobe(path)
+    fmt = info.get("format", {})
+    size = int(fmt.get("size") or (os.path.getsize(path) if os.path.exists(path) else 0))
+    dur = _dur(fmt.get("duration"))
+
+    if not any(_is_real_video(st) for st in info.get("streams", [])) \
+            and not any(st.get("codec_type") == "audio" for st in info.get("streams", [])):
+        if not size:
+            return ""
+        return (f"<blockquote expandable>💾 {tr('CAP_SIZE', lang)}: "
+                f"<code>{size / 1024 / 1024:.2f} MiB</code></blockquote>")
+
+    if is_music(info):
+        bitrate = int((fmt.get("bit_rate") or 0)) // 1000
+        return (f"<blockquote expandable>⏱️ {tr('CAP_DURATION', lang)}: <code>{dur}</code>\n"
+                f"🔊 {tr('CAP_BITRATE', lang)}: <code>{bitrate}kbps</code>\n"
+                f"💾 {tr('CAP_SIZE', lang)}: <code>{size / 1024 / 1024:.2f} MiB</code></blockquote>")
+
+    w = h = 0
+    vcodec = hdr = fps = ""
+    for st in info.get("streams", []):
+        if _is_real_video(st):
+            w, h = st.get("width") or 0, st.get("height") or 0
+            vcodec = _codec_label(st.get("codec_name"), _VCODEC)
+            hdr = _hdr_label(st)
+            fps = _fps_label(st)
+            break
+    acodec = ""
+    for st in info.get("streams", []):
+        if st.get("codec_type") == "audio":
+            acodec = " ".join(p for p in (_codec_label(st.get("codec_name"), _ACODEC),
+                                          _channels_label(st.get("channels"))) if p)
+            break
+    quality = " · ".join(p for p in (f"{h}p" if h else "?", hdr, vcodec,
+                                     (f"{fps}fps" if fps else "")) if p)
+    mode = tr("CAP_LANDSCAPE", lang) if w >= h else tr("CAP_PORTRAIT", lang)
+    audio_langs = _stream_langs(info, "audio")
+    sub_langs = _stream_langs(info, "subtitle")
+    block = [
+        f"<b>{tr('CAP_DURATION', lang)}: </b><code>{dur}</code>, "
+        f"<b>{tr('CAP_SIZE', lang)}: </b><code>{_human_size(size)}</code>",
+        f"<b>{tr('CAP_QUALITY', lang)}: </b><code>{quality}</code>, "
+        f"<b>{tr('CAP_DIMENSION', lang)}: </b><code>{w}x{h}</code>, "
+        f"<b>{tr('CAP_MODE', lang)}: </b><code>{mode}</code>",
+    ]
+    audio_bits = [b for b in (acodec, ", ".join(audio_langs)) if b]
+    if audio_bits:
+        line = f"🔊 <b>{tr('CAP_AUDIO', lang)}: </b><code>{' · '.join(audio_bits)}</code>"
+        if sub_langs:
+            line += f"  📝 <b>{tr('CAP_SUBTITLES_CAP', lang)}: </b><code>{', '.join(sub_langs)}</code>"
+        block.append(line)
+    return "<blockquote expandable>" + "\n".join(block) + "</blockquote>"
+
+
 def build_caption(path: str, service_name: str = "", source_url: str = "", media_url: str = "",
                   lang: str = "en", display_title: str = "", description: str = "",
                   upload_date: str = "") -> str:
