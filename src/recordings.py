@@ -23,7 +23,7 @@ from .tg import call, edit, send
 
 CHANNELS_FILE = config.STATE_DIR / "kan_channels.json"
 REC_DIR = os.environ.get("REC_DIR", "/data/recordings")          # nginx serves this (token dirs)
-REC_URL_BASE = os.environ.get("REC_URL_BASE", "https://rec.avidev.net").rstrip("/")
+REC_URL_BASE = os.environ.get("REC_URL_BASE", "").rstrip("/")
 REC_PROXY = os.environ.get("REC_PROXY", "http://127.0.0.1:8889")  # IL proxy for the live edge
 TG_LIMIT = 2 * 1024 * 1024 * 1024                                 # send via Telegram below this
 DURATIONS = [("30m", 1800), ("1h", 3600), ("90m", 5400), ("2h", 7200), ("3h", 10800)]
@@ -215,6 +215,9 @@ async def _deliver(chat: int, uid: int, mid: int, path: str, title: str, lang: s
                           + f"\n\n🔗 {url}", [[(tr("MENU", lang), "m:main")]])
     except Exception:
         pass                                                     # gofile failed: fall back to our own link
+    if not REC_URL_BASE:
+        await edit(chat, mid, "❌ REC_URL_BASE is not configured", [[(tr("MENU", lang), "m:main")]])
+        return
     # fallback: publish behind a random token dir on our server + send the link
     token = secrets.token_urlsafe(18)
     dest_dir = os.path.join(REC_DIR, token)
