@@ -26,7 +26,7 @@ from .errors import report_error
 from .i18n import tr
 from .keepalive import keepalive_loop
 from .menus import (_after_account, _search_labels, account_service, accounts_menu, ask_input, cdm_menu,
-                    delivery_mode_menu, gofile_mode_menu, language_menu, main_menu, my_downloads,
+                    delivery_mode_menu, language_menu, main_menu, my_downloads,
                     pick_account_or_go, picker,
                     _ready_to_start,
                     continue_after_track_types, service_view_menu, settings_menu, service_detail, services_grid,
@@ -123,11 +123,6 @@ async def on_callback(cq: dict):
     if data.startswith("lang:"):
         users.set_lang(uid, data.split(":", 1)[1])
         return await settings_menu(chat, uid, mid)
-    if data == "m:gfmode":
-        return await gofile_mode_menu(chat, uid, mid)
-    if data.startswith("gfmode:"):
-        users.set_gofile_mode(uid, data.split(":", 1)[1])
-        return await gofile_mode_menu(chat, uid, mid)
     if data == "m:dmode":
         return await delivery_mode_menu(chat, uid, mid)
     if data.startswith("dmode:"):
@@ -151,21 +146,13 @@ async def on_callback(cq: dict):
     if data.startswith("lnk:"):                       # Telegram vs download-link choice for this job
         _, jid, lt = data.split(":", 2)
         return answer_link_ask(jid, lt == "l")
-    if data.startswith("predlv:"):                    # pre-download delivery choice
+    if data.startswith("predlv:"):                    # pre-download delivery choice (t/l/g)
         choice = data.rsplit(":", 1)[1]
         sess(uid)["delivery_link"] = choice == "l"
         sess(uid)["gofile_only"] = choice == "g"
-        sess(uid)["gofile"] = choice == "g"
-        if choice == "t":
-            sess(uid)["gofile"] = False
-            sess(uid)["_preflight_gofile_done"] = True
         sess(uid)["_preflight_delivery_done"] = True
         if choice == "t" and "video" in to_sel(sess(uid).get("tsel")):
             return await show_send_as(chat, uid, mid)
-        return await start_download(chat, uid, mid, sess(uid).get("dl_profile", str(uid)))
-    if data.startswith("pregf:"):                     # pre-download "also upload to gofile?" choice
-        sess(uid)["gofile"] = data.rsplit(":", 1)[1] == "y"
-        sess(uid)["_preflight_gofile_done"] = True
         return await start_download(chat, uid, mid, sess(uid).get("dl_profile", str(uid)))
     if data.startswith("gfd:"):                      # gofile download folder controls
         gf = sess(uid).get("gfd") or {}

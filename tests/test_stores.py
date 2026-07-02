@@ -101,17 +101,19 @@ def test_added_user_permissions():
     assert users.service_allowed(uid, "X", has_drm=False) is True
 
 
-def test_gofile_mode_default_and_set():
+def test_delivery_mode_default_and_set():
+    # One consolidated delivery setting: telegram / link / gofile / ask (gofile is no longer separate).
     u = users.add("800800", by=1, ts=0)
     uid = u["id"]
-    assert users.gofile_mode(uid) == "ask"                  # default: prompt each download
-    assert users.gofile_mode(999999) == "ask"               # unknown user -> safe default
-    users.set_gofile_mode(uid, "always")
-    assert users.gofile_mode(uid) == "always"
-    users.set_gofile_mode(uid, "never")
-    assert users.gofile_mode(uid) == "never"
-    assert users.set_gofile_mode(uid, "bogus") is None       # invalid mode rejected
-    assert users.gofile_mode(uid) == "never"                 # unchanged after a bad set
+    assert users.DELIVERY_MODES == ("ask", "telegram", "link", "gofile")
+    assert users.delivery_mode(uid) == "ask"                # default: prompt each download
+    assert users.delivery_mode(999999) == "ask"             # unknown user -> safe default
+    for m in ("telegram", "link", "gofile"):
+        users.set_delivery_mode(uid, m)
+        assert users.delivery_mode(uid) == m
+    assert users.set_delivery_mode(uid, "bogus") is None     # invalid mode rejected
+    assert users.delivery_mode(uid) == "gofile"              # unchanged after a bad set
+    assert not hasattr(users, "gofile_mode")                 # the separate gofile setting is gone
 
 
 def test_default_credential_resolves_only_for_default_profile():

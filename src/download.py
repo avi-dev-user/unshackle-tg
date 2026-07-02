@@ -221,35 +221,6 @@ def _format_file_summary(items: list[dict], lang: str, details_limit: int = 3) -
     return "\n".join(lines)
 
 
-async def _decide_gofile(chat: int, uid: int, mid: int, job_id: str, head_name: str,
-                         lang: str, is_monitor: bool, has_big: bool) -> bool:
-    """Whether to also publish this job's files to a gofile folder link. Honours the user's
-    setting (ask/always/never). An over-cap file has no Telegram path, so it forces gofile on
-    regardless of the preference (otherwise it could not be delivered at all)."""
-    if has_big:                         # no Telegram path -> gofile is the only way; don't bother asking
-        return True
-    mode = users.gofile_mode(uid)
-    if mode == "always":
-        return True
-    if mode == "never":
-        return False
-    if is_monitor:                      # automated runs can't be prompted
-        return False
-    ev = asyncio.Event()
-    _gfask[job_id] = ev
-    _gfask_ans.pop(job_id, None)
-    rows = [[(tr("YES_GOFILE", lang), f"gfask:{job_id}:y"),
-             (tr("NO_TG_ONLY", lang), f"gfask:{job_id}:n")]]
-    await edit(chat, mid, f"🎬 {head_name}\n☁️ " + tr("ASK_GOFILE", lang), rows)
-    try:
-        await asyncio.wait_for(ev.wait(), timeout=180)
-    except asyncio.TimeoutError:
-        pass
-    _gfask.pop(job_id, None)
-    ans = _gfask_ans.pop(job_id, None)
-    return bool(ans)                    # no answer in time -> no (Telegram-only)
-
-
 # --------------------------------------------------------------------------
 # Job output helpers
 # --------------------------------------------------------------------------
@@ -409,22 +380,9 @@ async def start_download(chat: int, uid: int, mid: int, profile: str):
                         [(tr("DELIVER_GOFILE", lang), "predlv:g")]]
                 return await edit(chat, mid, f"🎬 {head_name}\n📦 " + tr("ASK_DELIVERY", lang), rows)
             s["delivery_link"] = delivery_mode == "link"
-            s["gofile_only"] = False
+            s["gofile_only"] = delivery_mode == "gofile"
             s["_preflight_delivery_done"] = True
-        if s.get("delivery_link") or s.get("gofile_only"):
-            s["_preflight_gofile_done"] = True
-            s["gofile"] = bool(s.get("gofile_only"))
-        elif not s.get("_preflight_gofile_done"):
-            gofile_mode = users.gofile_mode(uid)
-            s["dl_profile"] = profile
-            if gofile_mode == "ask":
-                rows = [[(tr("YES_GOFILE", lang), "pregf:y"),
-                         (tr("NO_TG_ONLY", lang), "pregf:n")]]
-                return await edit(chat, mid, f"🎬 {head_name}\n☁️ " + tr("ASK_GOFILE", lang), rows)
-            s["gofile"] = gofile_mode == "always"
-            s["_preflight_gofile_done"] = True
     delivery_link = bool(s.get("delivery_link")) if not keys_only else False
-    gofile_choice = bool(s.get("gofile")) if not keys_only else False
     gofile_only = bool(s.get("gofile_only")) if not keys_only else False
     flags, q = build_flags(uid, s["service"], profile, s.get("tsel"), s.get("quality"),
                            s.get("s_lang"), s.get("sub_extra_lang"), s.get("cdm"), a_lang=s.get("a_lang"),
@@ -440,7 +398,7 @@ async def start_download(chat: int, uid: int, mid: int, profile: str):
                           source_media=s.get("source_media", ""),
                           description=s.get("description", ""), upload_date=s.get("upload_date", ""),
                           cover_url=s.get("cover_url", ""), keys_only=keys_only,
-                          delivery_link=delivery_link, gofile_upload=gofile_choice,
+                          delivery_link=delivery_link, gofile_upload=False,
                           gofile_only=gofile_only)
     for k in ("_preflight_delivery_done", "_preflight_gofile_done", "_preflight_sendas_done",
               "_sub_lang_chosen", "_vcodec_chosen", "delivery_link", "gofile", "gofile_only", "vcodec"):
@@ -736,18 +694,10 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                 msg += "\n\n" + tr("REC_LINK_EXPIRES", lang)
                 await edit(chat, mid, msg, [[(tr("MENU", lang), "m:main")]])
                 return
-            # Optional extra: publish the whole job (all files) into ONE gofile folder -> one link.
-            # Honours the user's ask/always/never setting. If we reached here with an over-cap file
-            # (has_big) it means the self-hosted link wasn't available, so gofile is the only path.
+            # gofile delivery: the user picked it (gofile_only), or an over-cap file reached here
+            # (has_big) meaning the self-hosted link wasn't available, so gofile is the only path.
             gofile_only = bool(dl_spec and dl_spec.get("gofile_only"))
-            if has_big:
-                want_gf = True
-            elif gofile_only:
-                want_gf = True
-            elif dl_spec and dl_spec.get("gofile_upload") is not None:
-                want_gf = bool(dl_spec.get("gofile_upload"))
-            else:
-                want_gf = await _decide_gofile(chat, uid, mid, job_id, head_name, lang, is_monitor, has_big)
+            want_gf = has_big or gofile_only
             gf_sess = gofile.Session() if want_gf else None
             file_items = [
                 {
