@@ -32,7 +32,8 @@ from .menus import (_after_account, _search_labels, account_service, accounts_me
                     continue_after_track_types, service_view_menu, settings_menu, service_detail, services_grid,
                     show_audio_langs, show_dl_cover, show_episodes,
                     show_gofile_folder, show_quality, show_search_results, show_send_as, show_sub_langs,
-                    show_titles, show_track_types, show_tracks, show_video_codecs, tag_menu, ask_tag)
+                    show_titles, show_track_types, show_tracks, show_video_codecs, tag_menu, ask_tag,
+                    default_tag_menu, ask_default_tag)
 from .monitors_ui import (_mon_iv, _mon_last, _parse_interval, _parse_schedule, _save_monitor,
                           _schedule_label, monitor_ask_cover, monitor_ask_interval,
                           monitor_ask_sendas, monitor_ask_start, monitor_ask_tracks,
@@ -140,6 +141,13 @@ async def on_callback(cq: dict):
     if data == "tagclear":
         users.set_tag_pref(uid, "")
         return await tag_menu(chat, uid, mid)
+    if data == "m:dtag" and users.is_admin(uid):
+        return await default_tag_menu(chat, uid, mid)
+    if data == "dtagset" and users.is_admin(uid):
+        return await ask_default_tag(chat, uid, mid)
+    if data == "dtagclear" and users.is_admin(uid):
+        users.set_default_tag("")
+        return await default_tag_menu(chat, uid, mid)
     if data.startswith("gfask:"):                    # answer to the "upload to gofile?" prompt
         _, jid, yn = data.split(":", 2)
         return answer_gofile_ask(jid, yn == "y")
@@ -1132,6 +1140,12 @@ async def on_message(msg: dict):
         msg = tr("TAG_SAVED", lang).format(tag=saved) if saved else tr("TAG_CLEARED", lang)
         m = await send(chat, msg)
         return await tag_menu(chat, uid, m["result"]["message_id"])
+    if s.get("step") == "await_default_tag" and text and users.is_admin(uid):  # admin typed the default tag
+        s["step"] = None
+        saved = users.set_default_tag(text)
+        msg = tr("DEFAULT_TAG_SAVED", lang).format(tag=saved) if saved else tr("DEFAULT_TAG_CLEARED", lang)
+        m = await send(chat, msg)
+        return await default_tag_menu(chat, uid, m["result"]["message_id"])
     if s.get("step") == "await_input" and text:      # non-URL input (e.g. id/search)
         s["step"] = None
         return await show_titles(chat, uid, text)

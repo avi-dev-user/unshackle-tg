@@ -19,29 +19,31 @@ from . import config
 _PATH = config.STATE_DIR / "users.json"
 _users: list[dict] = []          # in-memory cache; each dict is one user record
 _seen: dict[int, str] = {}       # every chat_id that EVER contacted the bot -> name (for broadcast)
+_settings: dict = {}             # bot-wide admin settings (e.g. default release-group tag)
 
 
 def _save() -> None:
     config.STATE_DIR.mkdir(parents=True, exist_ok=True)
     tmp = _PATH.parent / (_PATH.name + ".tmp")     # atomic write: a crash mid-write can't truncate
     tmp.write_text(json.dumps(
-        {"users": _users, "seen": [{"id": i, "name": n} for i, n in _seen.items()]},
+        {"users": _users, "seen": [{"id": i, "name": n} for i, n in _seen.items()], "settings": _settings},
         ensure_ascii=False, indent=2))
     os.replace(tmp, _PATH)
 
 
 def load() -> None:
     """Load the store and ensure every bootstrap admin exists as an admin record."""
-    global _users, _seen
+    global _users, _seen, _settings
     if _PATH.exists():
         try:
             doc = json.loads(_PATH.read_text())
             _users = doc.get("users", [])
             _seen = {e["id"]: e.get("name", "") for e in doc.get("seen", []) if e.get("id") is not None}
+            _settings = doc.get("settings", {})
         except (ValueError, OSError):
-            _users, _seen = [], {}
+            _users, _seen, _settings = [], {}, {}
     else:
-        _users, _seen = [], {}
+        _users, _seen, _settings = [], {}, {}
     changed = False
     for aid in config.ADMIN_IDS:
         u = _by_id(aid)
@@ -397,14 +399,21 @@ def sanitize_tag(raw: str) -> str:
 
 
 def tag_pref(tg_id: int) -> str:
-    """The user's preferred group tag ('' = use the server default from unshackle.yaml)."""
+    """The user's own group tag, if they set one ('' if they haven't). Does not fall back to
+    the admin default - use effective_tag() for the value to actually pass to a download."""
     u = _by_id(tg_id)
     return (u or {}).get("group_tag") or ""
 
 
+def effective_tag(tg_id: int) -> str:
+    """The tag to actually use for this user's downloads: their own if set, else the
+    admin-configured default (else '' - unshackle falls back to its own unshackle.yaml default)."""
+    return tag_pref(tg_id) or get_default_tag()
+
+
 def set_tag_pref(tg_id: int, raw: str) -> str | None:
-    """Set (or clear, when sanitized to '') the user's group tag.
-    Returns the stored tag, or None for an unknown user."""
+    """Set (or clear, when sanitized to '') the user's own group tag, overriding the admin
+    default. Returns the stored tag ('' if cleared), or None for an unknown user."""
     u = _by_id(tg_id)
     if u is None:
         return None
@@ -413,6 +422,22 @@ def set_tag_pref(tg_id: int, raw: str) -> str | None:
         u["group_tag"] = tag
     else:
         u.pop("group_tag", None)
+    _save()
+    return tag
+
+
+def get_default_tag() -> str:
+    """Admin: the bot-wide default group tag, used for any user who hasn't set their own."""
+    return _settings.get("default_tag") or ""
+
+
+def set_default_tag(raw: str) -> str:
+    """Admin: set (or clear, when sanitized to '') the bot-wide default group tag."""
+    tag = sanitize_tag(raw)
+    if tag:
+        _settings["default_tag"] = tag
+    else:
+        _settings.pop("default_tag", None)
     _save()
     return tag
 

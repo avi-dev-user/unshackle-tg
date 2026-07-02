@@ -103,8 +103,11 @@ async def settings_menu(chat: int, uid: int, mid: int):
         [(f"🧭 {tr('SERVICE_VIEW_SETTING', lang)}: {svc_view_label}", "m:svview")],
         [(f"📦 {tr('DELIVERY_SETTING', lang)}: {dmode_label}", "m:dmode")],
         [(f"🏷️ {tr('TAG_SETTING', lang)}: {tag or tr('TAG_NONE', lang)}", "m:tag")],
-        [(tr("MENU", lang), "m:main")],
     ]
+    if users.is_admin(uid):
+        default_tag = users.get_default_tag()
+        rows.append([(f"🏷️ {tr('DEFAULT_TAG_SETTING', lang)}: {default_tag or tr('TAG_NONE', lang)}", "m:dtag")])
+    rows.append([(tr("MENU", lang), "m:main")])
     await edit(chat, mid, tr("SETTINGS", lang), rows)
 
 
@@ -124,6 +127,24 @@ async def ask_tag(chat: int, uid: int, mid: int):
     lang = users.lang(uid)
     sess(uid).update(step="await_tag")
     await edit(chat, mid, tr("TAG_SET_PROMPT", lang), [[(tr("CANCEL", lang), "m:settings")]])
+
+
+async def default_tag_menu(chat: int, uid: int, mid: int):
+    """Admin: set or clear the bot-wide default release-group tag."""
+    lang = users.lang(uid)
+    cur = users.get_default_tag()
+    rows = [[(tr("DEFAULT_TAG_SET", lang), "dtagset")]]
+    if cur:
+        rows.append([(tr("DEFAULT_TAG_CLEAR", lang), "dtagclear")])
+    rows.append([(tr("BACK", lang), "m:settings")])
+    await edit(chat, mid, tr("DEFAULT_TAG_SETTING_EXPLAIN", lang).format(tag=cur or tr("TAG_NONE", lang)), rows)
+
+
+async def ask_default_tag(chat: int, uid: int, mid: int):
+    """Admin: prompt for the bot-wide default group tag (next text message is captured)."""
+    lang = users.lang(uid)
+    sess(uid).update(step="await_default_tag")
+    await edit(chat, mid, tr("DEFAULT_TAG_SET_PROMPT", lang), [[(tr("CANCEL", lang), "m:settings")]])
 
 
 async def delivery_mode_menu(chat: int, uid: int, mid: int):
