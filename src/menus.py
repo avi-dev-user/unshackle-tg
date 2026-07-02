@@ -93,8 +93,6 @@ async def settings_menu(chat: int, uid: int, mid: int):
     """Per-user settings: UI language + the gofile download-link preference."""
     lang = users.lang(uid)
     cur_lang = next((name for code, name in LANGS.items() if code == lang), lang)
-    mode = users.gofile_mode(uid)
-    mode_label = tr(f"GOFILE_MODE_{mode.upper()}", lang)
     dmode = users.delivery_mode(uid)
     dmode_label = tr(f"DELIVERY_MODE_{dmode.upper()}", lang)
     svc_view = users.service_view_mode(uid)
@@ -104,7 +102,6 @@ async def settings_menu(chat: int, uid: int, mid: int):
         [(f"🌐 {tr('LANGUAGE', lang)}: {cur_lang}", "m:lang")],
         [(f"🧭 {tr('SERVICE_VIEW_SETTING', lang)}: {svc_view_label}", "m:svview")],
         [(f"📦 {tr('DELIVERY_SETTING', lang)}: {dmode_label}", "m:dmode")],
-        [(f"☁️ {tr('GOFILE_SETTING', lang)}: {mode_label}", "m:gfmode")],
         [(f"🏷️ {tr('TAG_SETTING', lang)}: {tag or tr('TAG_NONE', lang)}", "m:tag")],
         [(tr("MENU", lang), "m:main")],
     ]
@@ -127,16 +124,6 @@ async def ask_tag(chat: int, uid: int, mid: int):
     lang = users.lang(uid)
     sess(uid).update(step="await_tag")
     await edit(chat, mid, tr("TAG_SET_PROMPT", lang), [[(tr("CANCEL", lang), "m:settings")]])
-
-
-async def gofile_mode_menu(chat: int, uid: int, mid: int):
-    """Pick how the extra gofile download link is handled: ask each time / always / never."""
-    lang = users.lang(uid)
-    cur = users.gofile_mode(uid)
-    rows = [[(("✅ " if m == cur else "") + tr(f"GOFILE_MODE_{m.upper()}", lang), f"gfmode:{m}")]
-            for m in users.GOFILE_MODES]
-    rows.append([(tr("BACK", lang), "m:settings")])
-    await edit(chat, mid, f"☁️ {tr('GOFILE_SETTING_EXPLAIN', lang)}", rows)
 
 
 async def delivery_mode_menu(chat: int, uid: int, mid: int):
@@ -665,10 +652,8 @@ async def _ready_to_start(chat: int, uid: int, mid: int, profile: str):
             and "video" in to_sel(s.get("tsel"))
             and not s.get("_preflight_sendas_done")):
         s["_preflight_delivery_done"] = True
-        s["_preflight_gofile_done"] = True
         s["delivery_link"] = False
         s["gofile_only"] = False
-        s["gofile"] = False
         return await show_send_as(chat, uid, mid)
     return await start_download(chat, uid, mid, profile)
 

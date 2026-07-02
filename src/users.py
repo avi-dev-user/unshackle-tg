@@ -343,36 +343,13 @@ def recent(tg_id: int) -> list[str]:
     return (u or {}).get("recent") or []
 
 
-GOFILE_MODES = ("ask", "always", "never")
-
-
-def gofile_mode(tg_id: int) -> str:
-    """How this user wants the extra gofile download link handled per download:
-    'ask' (default) - prompt each time; 'always' - always upload; 'never' - never."""
-    u = _by_id(tg_id)
-    m = (u or {}).get("gofile_mode")
-    return m if m in GOFILE_MODES else "ask"
-
-
-def set_gofile_mode(tg_id: int, mode: str) -> dict | None:
-    """Set the user's gofile-link preference (their own setting, not an admin flag)."""
-    u = _by_id(tg_id)
-    if u is None or mode not in GOFILE_MODES:
-        return None
-    u["gofile_mode"] = mode
-    _save()
-    return u
-
-
-DELIVERY_MODES = ("telegram", "link", "ask")
+DELIVERY_MODES = ("ask", "telegram", "link", "gofile")
 
 
 def delivery_mode(tg_id: int) -> str:
-    """How this user wants a finished download delivered:
-    'telegram' - upload the file to Telegram; 'link' - publish it behind a
-    self-hosted, auto-expiring download link instead of uploading; 'ask' - prompt per
-    download. Distinct from gofile_mode: that adds an EXTRA third-party link alongside
-    Telegram; this chooses the primary delivery (and 'link' skips the Telegram upload)."""
+    """How this user wants a finished download delivered (one setting, one choice):
+    'telegram' - upload the file to Telegram; 'link' - a self-hosted, auto-expiring
+    download link; 'gofile' - a gofile link; 'ask' - prompt per download."""
     u = _by_id(tg_id)
     m = (u or {}).get("delivery_mode")
     return m if m in DELIVERY_MODES else "ask"
