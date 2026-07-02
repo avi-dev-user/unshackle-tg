@@ -245,6 +245,11 @@ def build_caption(path: str, service_name: str = "", source_url: str = "", media
     /subtitle langs) is read from the downloaded file by ffprobe, so it is always accurate.
     media_url (the direct source file) is used to ENRICH music tags that the .mka remux dropped
     (artist/album/genre/composer) - ffprobe reads them from the source without a full download."""
+    # Some services (e.g. an app-only service like STING) pass their internal content ID as
+    # source_url, not a real page - only render the source link when it's an actual http(s) URL.
+    if source_url and not source_url.startswith(("http://", "https://")):
+        source_url = ""
+
     info = _ffprobe(path)
     fmt = info.get("format", {})
     tags = _read_tags(path)
