@@ -686,6 +686,7 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
             from urllib.parse import urlparse
             src_name = (urlparse(src_url).hostname or "").replace("www.", "") or src_url or "?"
             total = len(files)
+            has_big = any(os.path.getsize(f) > uploader.max_cap() for f in files if os.path.exists(f))
             # Primary delivery choice: a self-hosted, expiring download link instead of a Telegram
             # upload (telegram/link/ask per the user's setting). 'link' is also the natural path for
             # over-cap files (no Telegram size limit on a direct link).
@@ -693,6 +694,11 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                 use_link = bool(dl_spec.get("delivery_link"))
             else:
                 use_link = await _decide_link(chat, uid, mid, job_id, head_name, lang, is_monitor)
+            # Telegram tops out at 4 GiB (Premium) - a bigger file simply can't be uploaded, so
+            # force the self-hosted link (when configured) unless the user explicitly chose gofile.
+            forced_big_link = False
+            if has_big and not use_link and REC_URL_BASE and not (dl_spec and dl_spec.get("gofile_only")):
+                use_link, forced_big_link = True, True
             if use_link:
                 link_items = [
                     {
@@ -713,6 +719,8 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                                [[(tr("MENU", lang), "m:main")]])
                     return
                 msg = "✅ " + tr("LINK_READY", lang)
+                if forced_big_link:
+                    msg = "ℹ️ " + tr("TOO_BIG_LINK", lang) + "\n\n" + msg
                 stats = []
                 if total_bytes:
                     stats.append(f"💾 {_fmt_size(total_bytes)}")
@@ -729,8 +737,8 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                 await edit(chat, mid, msg, [[(tr("MENU", lang), "m:main")]])
                 return
             # Optional extra: publish the whole job (all files) into ONE gofile folder -> one link.
-            # Honours the user's ask/always/never setting; an over-cap file forces it on (no TG path).
-            has_big = any(os.path.getsize(f) > uploader.max_cap() for f in files if os.path.exists(f))
+            # Honours the user's ask/always/never setting. If we reached here with an over-cap file
+            # (has_big) it means the self-hosted link wasn't available, so gofile is the only path.
             gofile_only = bool(dl_spec and dl_spec.get("gofile_only"))
             if has_big:
                 want_gf = True
