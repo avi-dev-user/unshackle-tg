@@ -47,6 +47,10 @@ ADMIN_IDS = _ids("ADMIN_IDS")
 UNSHACKLE_API = os.environ.get("UNSHACKLE_API", "http://127.0.0.1:8786/api").rstrip("/")
 UNSHACKLE_API_KEY = os.environ.get("UNSHACKLE_API_KEY", "")
 
+# Region tag on the manual "manifest + keys" JSON catalog export - the JSON service treats
+# this as its GEOFENCE, so it decides which configured proxy_providers entry to route through.
+KEYS_DOWNLOAD_REGION = os.environ.get("KEYS_DOWNLOAD_REGION", "IL")
+
 # --- Service catalog routing (data-driven; the framework ships generic, a deployment
 # configures these for its own services - no service names are hardcoded in the code) ---
 # {tag: "il"|"free"|"sub"} category seeds (admin overrides in categories.json win over these)

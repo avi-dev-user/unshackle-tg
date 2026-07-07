@@ -644,7 +644,7 @@ async def _keys_download(chat: int, uid: int, titles: list[dict]):
     m = await send(chat, "🔑 " + tr("KEYS_PREPARING", lang))
     mid = m["result"]["message_id"]
     try:
-        export = {"version": 2, "service": "JSON", "region": "IL", "titles": {}}
+        export = {"version": 2, "service": "JSON", "region": config.KEYS_DOWNLOAD_REGION, "titles": {}}
         for i, t in enumerate(titles):
             urls = t["urls"]
             mtype = "HLS" if any(".m3u8" in u.lower() for u in urls) else "DASH"
