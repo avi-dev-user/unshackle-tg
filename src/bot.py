@@ -164,11 +164,34 @@ async def on_callback(cq: dict):
         return await start_download(chat, uid, mid, sess(uid).get("dl_profile", str(uid)))
     if data.startswith("gfd:"):                      # gofile download folder controls
         gf = sess(uid).get("gfd") or {}
+        if data.startswith("gfd:tog:"):              # toggle a single file in/out of the selection
+            i = int(data.rsplit(":", 1)[1])
+            files = gf.get("files") or []
+            cur = set(gf.get("sel") if gf.get("sel") is not None else range(len(files)))
+            if i in cur:
+                cur.discard(i)
+            else:
+                cur.add(i)
+            gf["sel"] = sorted(cur)
+            sess(uid)["gfd"] = gf
+            return await show_gofile_folder(chat, uid, mid)
+        if data == "gfd:all":
+            gf["sel"] = list(range(len(gf.get("files") or [])))
+            sess(uid)["gfd"] = gf
+            return await show_gofile_folder(chat, uid, mid)
+        if data == "gfd:none":
+            gf["sel"] = []
+            sess(uid)["gfd"] = gf
+            return await show_gofile_folder(chat, uid, mid)
         if data in ("gfd:sa:video", "gfd:sa:file"):
             gf["send_as"] = data.rsplit(":", 1)[1]
             sess(uid)["gfd"] = gf
             return await show_gofile_folder(chat, uid, mid)
-        if data == "gfd:cov":
+        if data == "gfd:cov:auto":                   # use the automatic (generated) thumbnail
+            gf["cover"] = None
+            sess(uid)["gfd"] = gf
+            return await show_gofile_folder(chat, uid, mid)
+        if data == "gfd:cov:up":                      # upload a custom thumbnail
             sess(uid)["step"] = "await_gf_cover"
             return await edit(chat, mid, tr("UPLOAD_THUMBNAIL", lang), [[(tr("BACK", lang), "gfd:back")]])
         if data == "gfd:back":
@@ -694,15 +717,20 @@ async def _gofile_download_all(chat: int, uid: int, mid: int):
     cap fall back to the original public gofile link."""
     lang = users.lang(uid)
     gf = sess(uid).get("gfd") or {}
-    files, token = gf.get("files") or [], gf.get("token") or ""
+    all_files, token = gf.get("files") or [], gf.get("token") or ""
+    sel = gf.get("sel")
+    files = [all_files[i] for i in sel if 0 <= i < len(all_files)] if sel is not None else all_files
     if not files:
         return await edit(chat, mid, tr("GOFILE_EMPTY", lang), [[(tr("MENU", lang), "m:main")]])
     up_dir = config.STATE_DIR / "gfdl" / str(uid)
     up_dir.mkdir(parents=True, exist_ok=True)
     total, sent, errs = len(files), 0, []
     for idx, f in enumerate(files, 1):
-        up_dir.mkdir(parents=True, exist_ok=True)    # deliver() rmdir's it once empty - recreate per file
         name = f["name"]
+        if (f.get("size") or 0) > uploader.max_cap():    # beyond even the Premium userbot cap -> link only
+            errs.append(f"{name} ({tr('GOFILE_TOO_BIG', lang)})")
+            continue
+        up_dir.mkdir(parents=True, exist_ok=True)    # deliver() rmdir's it once empty - recreate per file
         safe = re.sub(r'[\\/:*?"<>|]', "", name).strip() or f"file_{idx}"
         dest = str(up_dir / safe)
         head = f"☁️ {html.escape(gf.get('folder') or 'gofile')}\n⬇️ {idx}/{total} <code>{html.escape(name)}</code>"
@@ -737,7 +765,7 @@ async def _gofile_download_all(chat: int, uid: int, mid: int):
                                    force_kind=force, cover_path=gf.get("cover"), progress=_uprog)
             sent += 1
         except Exception as e:
-            errs.append(f"{name} ({tr('GOFILE_TOO_BIG', lang)})")
+            errs.append(f"{name} ({tr('GOFILE_DL_ERR', lang)})")   # real deliver error (size pre-filtered above)
             print(f"gofile deliver failed ({name}): {e}")
         finally:
             try:
