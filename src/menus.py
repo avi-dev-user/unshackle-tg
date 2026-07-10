@@ -574,8 +574,9 @@ async def show_dl_cover(chat: int, uid: int, mid: int):
 
 
 async def show_gofile_folder(chat: int, uid: int, mid: int):
-    """Render a resolved gofile folder: files, and (only if it has video) the send-as and
-    thumbnail options - just like a normal download. Then a one-tap 'download all'."""
+    """Render a resolved gofile folder: per-file selection (a checkbox each), and - if any selected
+    file is video - the send-as and thumbnail options, just like a normal download. Then download
+    the selected files. Per-file toggles are shown for a sane count; huge folders fall back to all."""
     from .format import _fmt_size
     s = sess(uid)
     lang = users.lang(uid)
@@ -583,24 +584,43 @@ async def show_gofile_folder(chat: int, uid: int, mid: int):
     files = gf.get("files") or []
     if not files:
         return await edit(chat, mid, tr("GOFILE_EMPTY", lang), [[(tr("MENU", lang), "m:main")]])
-    has_video = any(f.get("is_video") for f in files)
+    sel = gf.get("sel")
+    if sel is None:                                  # default: everything selected
+        sel = list(range(len(files)))
+        gf["sel"] = sel
+        s["gfd"] = gf
+    selset = set(sel)
+    per_file = len(files) <= 30                      # toggle UI only for a sane count; else all-only
     lines = [f"☁️ <b>{html.escape(gf.get('folder') or 'gofile')}</b>",
              tr("GOFILE_FILES_COUNT", lang).format(n=len(files))]
-    for f in files[:12]:
+    for i, f in enumerate(files[:30]):
         ic = "🎬" if f.get("is_video") else "📄"
-        lines.append(f"{ic} <code>{html.escape(f['name'])}</code> · {_fmt_size(f.get('size') or 0)}")
-    if len(files) > 12:
-        lines.append(f"... (+{len(files) - 12})")
+        mark = (("✅" if i in selset else "☐") + " ") if per_file else ""
+        lines.append(f"{mark}{i + 1}. {ic} <code>{html.escape(f['name'])}</code> · {_fmt_size(f.get('size') or 0)}")
+    if len(files) > 30:
+        lines.append(f"... (+{len(files) - 30})")
     if gf.get("subfolders"):
         lines.append("📁 " + tr("GOFILE_SUBFOLDERS_SKIPPED", lang).format(n=gf["subfolders"]))
     rows = []
-    if has_video:                                   # send-as + thumbnail apply only to video
+    if per_file:                                     # a numbered toggle per file, 5 per row
+        toggles = [(("✅" if i in selset else "☐") + f" {i + 1}", f"gfd:tog:{i}") for i in range(len(files))]
+        for j in range(0, len(toggles), 5):
+            rows.append(toggles[j:j + 5])
+        rows.append([(tr("GOFILE_SELECT_ALL", lang), "gfd:all"), (tr("GOFILE_SELECT_NONE", lang), "gfd:none")])
+        sel_files = [files[i] for i in sel if 0 <= i < len(files)]
+    else:
+        sel_files = files
+    if any(f.get("is_video") for f in sel_files):    # send-as + thumbnail apply only to video
         sa = gf.get("send_as") or "video"
         rows.append([(("✅ " if sa == "video" else "") + tr("AS_VIDEO_PLAYER_THUMBNAIL", lang), "gfd:sa:video"),
                      (("✅ " if sa == "file" else "") + tr("AS_FILE", lang), "gfd:sa:file")])
-        cov = tr("THUMBNAIL_CUSTOM", lang) if gf.get("cover") else tr("AUTOMATIC_THUMBNAIL", lang)
-        rows.append([(f"🖼️ {cov}", "gfd:cov")])
-    rows.append([(tr("GOFILE_DOWNLOAD_ALL", lang).format(n=len(files)), "gfd:go")])
+        has_cover = bool(gf.get("cover"))            # like a normal download: automatic vs upload
+        rows.append([(("✅ " if not has_cover else "") + "🖼️ " + tr("AUTOMATIC_THUMBNAIL", lang), "gfd:cov:auto"),
+                     (("✅ " if has_cover else "") + tr("UPLOAD_THUMBNAIL", lang), "gfd:cov:up")])
+    if not per_file:
+        rows.append([(tr("GOFILE_DOWNLOAD_ALL", lang).format(n=len(files)), "gfd:go")])
+    elif sel:
+        rows.append([(tr("GOFILE_DOWNLOAD_SELECTED", lang).format(n=len(sel)), "gfd:go")])
     rows.append([(tr("MENU", lang), "m:main")])
     await edit(chat, mid, "\n".join(lines), rows)
 
