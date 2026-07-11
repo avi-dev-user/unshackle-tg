@@ -539,6 +539,8 @@ async def show_quality(chat: int, uid: int, mid: int):
     else:
         rows = grid_rows([(f"{h}p", f"q:{h}") for h in heights], 3)
     rows.append([(tr("BEST", lang), "q:best")])
+    if len(heights) > 1:
+        rows.append([(tr("ALL_QUALITIES", lang), "q:all")])
     rows.append([(tr("BACK", lang), "tt:back")])
     await edit(chat, mid, f"{_wiz_head(s, lang)}\n" + tr("PICK_QUALITY", lang), rows)
 

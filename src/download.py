@@ -304,7 +304,9 @@ def build_flags(uid: int, service: str, profile: str, sel, quality,
     keys_only adds skip_dl + export: the engine licenses the tracks (so we get the content keys)
     but writes no media, and returns the manifest + keys on the job as `keys_export`."""
     sel = to_sel(sel)
-    q = None if (quality == "best" or "video" not in sel) else [int(quality)]
+    # quality is a single height ("1080") or several comma-joined ("1080,720,...") when the
+    # user picked "all qualities" - either way, download each as its own file.
+    q = None if (quality == "best" or "video" not in sel) else [int(h) for h in str(quality).split(",")]
     if sel == {"audio"}:                       # audio only → keep the clean original (no remux)
         flags = {"audio_only": True, "no_video": True, "no_mux": True}
     elif sel == {"subs"}:                      # subtitles only
