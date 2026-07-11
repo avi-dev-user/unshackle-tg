@@ -278,6 +278,12 @@ async def _send_via_botapi(chat_id: int, path: str, caption: str, cover: str | N
     if thumb and os.path.exists(thumb):
         handles.append(open(thumb, "rb"))
         form.add_field("thumbnail", handles[-1], filename="thumb.jpg")
+        # thumbnail is the small (<=320px) preview icon; cover (Bot API 8.3+) is the actual
+        # poster shown when the video is opened - noticeably sharper. Needs its own handle,
+        # since the thumbnail field above already reads the first one to EOF.
+        if kind == "video":
+            handles.append(open(thumb, "rb"))
+            form.add_field("cover", handles[-1], filename="thumb.jpg")
     url = f"{config.BOT_API_BASE}/bot{config.BOT_TOKEN}/{method}"
 
     # progress: aiohttp streams the file by advancing its read position, so poll handle.tell()
