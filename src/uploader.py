@@ -407,10 +407,12 @@ async def _pyro_send(client, chat_id: int, path: str, caption: str, cover: str |
                 vw, vh = st.get("width") or 0, st.get("height") or 0
                 break
         vdur = int(float((info.get("format", {}) or {}).get("duration") or 0))
-        # generate a poster frame so Telegram shows a real thumbnail (not a grey box)
+        # generate a poster frame so Telegram shows a real thumbnail (not a grey box).
+        # thumb is the small chat-list preview; cover is the sharper poster shown when the
+        # video is opened (same image, Pyrogram sends both from one path here).
         thumb = cover or _make_video_thumb(path, vdur)
         try:
-            return await client.send_video(video=path, thumb=thumb, width=vw or None,
+            return await client.send_video(video=path, thumb=thumb, cover=thumb, width=vw or None,
                                   height=vh or None, duration=vdur or None,
                                   supports_streaming=True, **common)
         finally:
