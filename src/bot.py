@@ -550,7 +550,11 @@ async def on_callback(cq: dict):
         sess(uid)["_sub_lang_chosen"] = True
         return await continue_after_track_types(chat, uid, mid)
     if data.startswith("q:"):
-        sess(uid)["quality"] = data.split(":", 1)[1]
+        choice = data.split(":", 1)[1]
+        if choice == "all":
+            heights = sess(uid).get("heights") or []
+            choice = ",".join(str(h) for h in heights) if heights else "best"
+        sess(uid)["quality"] = choice
         return await pick_account_or_go(chat, uid, mid, sess(uid)["quality"])
     if data.startswith("sa:"):
         sess(uid)["send_as"] = data.split(":", 1)[1]         # "video" | "file"

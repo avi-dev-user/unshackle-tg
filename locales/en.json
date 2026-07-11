@@ -174,6 +174,7 @@
   "PICK_SUBTITLE_LANGUAGE": "Pick a subtitle language:",
   "PICK_AUDIO_LANGUAGE": "Pick an audio language:",
   "ALL_CODECS": "⬇️ All codecs",
+  "ALL_QUALITIES": "⬇️ All qualities",
   "PICK_THE_FIRST_EPISODE": "Pick the first episode to download (it and onward):",
   "RANDOM": "{lo}-{hi} (random)",
   "READING_THE_CATALOG": "📥 Reading the catalog...",
