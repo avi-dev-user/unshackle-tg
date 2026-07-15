@@ -84,13 +84,15 @@ async def start() -> bool:
     return True
 
 
-def _clean_name(path: str, title: str = "", ext: str = "") -> str:
-    """A human filename for Telegram: prefer the metadata title, dots/underscores
-    → spaces, real extension. Avoids Telegram's mangled '..._1.mka_1'."""
+def _clean_name(path: str, ext: str = "") -> str:
+    """The Telegram filename: the real on-disk (scene) name, so a media upload matches
+    the download link exactly - including the release-group tag and quality/source/codec.
+    Only strips characters Telegram rejects and normalises the extension (avoids Telegram's
+    mangled '..._1.mka_1'). 180 keeps any realistic scene name whole so the trailing tag
+    is never cut."""
     ext = ext or os.path.splitext(path)[1] or ".bin"
-    stem = (title or os.path.splitext(os.path.basename(path))[0]).strip()
-    stem = re.sub(r'[._]+', ' ', stem).strip()
-    stem = re.sub(r'[\\/:*?"<>|]', '', stem)[:120] or "file"
+    stem = os.path.splitext(os.path.basename(path))[0].strip()
+    stem = re.sub(r'[\\/:*?"<>|]', '', stem)[:180] or "file"
     return f"{stem}{ext}"
 
 
@@ -235,7 +237,7 @@ async def _send_via_botapi(chat_id: int, path: str, caption: str, cover: str | N
     tags.update((info.get("format", {}) or {}).get("tags") or {})
     title = metadata._expand_se(tags.get("title") or "", lang)
     ext = metadata.audio_ext(path) if kind == "music" else ""
-    fname = _clean_name(path, title, ext)
+    fname = _clean_name(path, ext)
 
     method = {"video": "sendVideo", "music": "sendAudio"}.get(kind, "sendDocument")
     field = {"video": "video", "music": "audio"}.get(kind, "document")
@@ -395,7 +397,7 @@ async def _pyro_send(client, chat_id: int, path: str, caption: str, cover: str |
     title = metadata._expand_se(tags.get("title") or "", lang)
     performer = tags.get("artist") or tags.get("album_artist") or ""
     ext = metadata.audio_ext(path) if kind == "music" else ""
-    fname = _clean_name(path, title, ext)
+    fname = _clean_name(path, ext)
     common = dict(chat_id=chat_id, caption=caption, parse_mode=ParseMode.HTML,
                   file_name=fname, progress=progress)
     if kind == "video":
