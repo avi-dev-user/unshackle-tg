@@ -63,7 +63,7 @@ def test_publish_link_builds_index_when_items_are_provided(tmp_path, monkeypatch
     items = [{"path": str(f), "name": f.name, "size": 1, "details_html": "<blockquote>ok</blockquote>"}]
     published = download.publish_link([str(f)], title="Movie", items=items, lang="he")
     token_dir = next(rec.iterdir())
-    assert published["page_url"] == f"https://x.test/{token_dir.name}/"
+    assert published["page_url"] == f"https://x.test/{token_dir.name}/index.html"
     index = token_dir / "index.html"
     assert index.exists()
     assert "movie.mkv" in index.read_text()
