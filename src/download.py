@@ -177,7 +177,7 @@ copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2
 dl:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>'};
 const base=location.href.replace(/[^/]*$/,"");
 $("copy-all").innerHTML=IC.copy+`<span class="lbl">${T.copyAll}</span>`;
-$("copy-all").onclick=()=>copy(DATA.items.map(it=>`${it.label}: ${base+enc(it.file)}`).join("\n"),T.copiedAll);
+$("copy-all").onclick=()=>copy(DATA.title+"\n\n"+DATA.items.map(it=>`${it.label}\n${base+enc(it.file)}`).join("\n\n"),T.copiedAll);
 const list=$("list");
 DATA.items.forEach((it,i)=>{const url=enc(it.file);const abs=base+url;const li=document.createElement("li");
   li.innerHTML=`<div class="num">${i+1}</div><div class="info"><div class="t">${it.label}</div><div class="s">${it.size}</div></div>
