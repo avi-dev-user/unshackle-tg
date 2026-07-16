@@ -6,6 +6,7 @@ This is a lower layer than the menus/monitor UI: it depends on the engine, uploa
 state, but never calls back into them. Progress and errors go out through tg/errors."""
 import asyncio
 import html
+import json
 import os
 import re
 import secrets
@@ -87,49 +88,167 @@ async def _decide_link(chat: int, uid: int, mid: int, job_id: str, head_name: st
     return bool(_lnk_ans.pop(job_id, None))     # no answer in time -> Telegram (the default)
 
 
-def _write_download_index(dest_dir: str, title: str, items: list[dict], lang: str) -> None:
-    file_word = "קבצים" if lang == "he" else "Files"
-    expires = tr("REC_LINK_EXPIRES", lang)
-    rows = []
-    for item in items:
-        name = html.escape(str(item.get("name") or "download"))
-        url = quote(str(item.get("name") or "download"))
-        kind = html.escape(_download_link_kind(str(item.get("name") or ""), lang))
-        size = html.escape(_fmt_size(item.get("size") or 0))
-        details = str(item.get("details_html") or "")
-        rows.append(
-            "<article>"
-            f"<div class=\"meta\">{kind} · {size}</div>"
-            f"<a class=\"file\" href=\"{url}\" download>{name}</a>"
-            f"{details}"
-            "</article>"
-        )
-    direction = "rtl" if lang == "he" else "ltr"
-    page = f"""<!doctype html>
-<html lang="{html.escape(lang)}" dir="{direction}">
+REC_PAGE_TEMPLATE = r"""<!doctype html>
+<html>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{html.escape(title or file_word)}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>מדיה</title>
 <style>
-:root {{ color-scheme: dark light; font-family: system-ui, -apple-system, Segoe UI, sans-serif; }}
-body {{ margin: 0; background: #111827; color: #f9fafb; }}
-main {{ max-width: 900px; margin: 0 auto; padding: 28px 18px 42px; }}
-h1 {{ font-size: 24px; margin: 0 0 8px; }}
-.hint {{ color: #cbd5e1; margin: 0 0 22px; }}
-article {{ border: 1px solid #334155; border-radius: 8px; padding: 14px; margin: 12px 0; background: #1f2937; }}
-.meta {{ color: #cbd5e1; font-size: 14px; margin-bottom: 8px; }}
-.file {{ color: #93c5fd; font-weight: 700; overflow-wrap: anywhere; }}
-blockquote {{ border-inline-start: 3px solid #64748b; margin: 12px 0 0; padding-inline-start: 10px; color: #e5e7eb; }}
-code {{ color: #fef3c7; }}
+  :root{--bg:#0F0F23;--surface:#181832;--surface-2:#20203c;--border:#2c2c52;--fg:#F8FAFC;
+    --muted:#a3a3c2;--primary:#6366F1;--accent:#22C55E;--accent-hover:#16a34a;--danger:#EF4444;--radius:14px;}
+  *{box-sizing:border-box}html,body{margin:0}
+  body{background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased;padding:0 0 3rem;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,"Noto Sans Hebrew",sans-serif;}
+  .wrap{max-width:1040px;margin:0 auto;padding:0 1.25rem}
+  header{position:sticky;top:0;z-index:10;background:rgba(15,15,35,.88);backdrop-filter:blur(12px);
+    border-bottom:1px solid var(--border)}
+  .head-inner{max-width:1040px;margin:0 auto;padding:1.1rem 1.25rem;display:flex;align-items:center;
+    gap:1rem;flex-wrap:wrap;justify-content:space-between}
+  h1{font-size:1.5rem;font-weight:700;margin:0;letter-spacing:-.01em}
+  .meta{color:var(--muted);font-size:.9rem;margin-top:.2rem}
+  .timer{display:inline-flex;align-items:center;gap:.45rem;background:var(--surface-2);border:1px solid var(--border);
+    border-radius:999px;padding:.45rem .85rem;font-size:.82rem;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+  .timer.warn{color:#fca5a5;border-color:#7f1d1d;background:#2a1414}
+  .timer b{color:var(--fg);font-weight:600}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);flex:none}
+  .timer.warn .dot{background:var(--danger)}
+  .head-actions{display:flex;gap:.5rem;width:100%;margin-top:.4rem}
+  .head-actions .act{flex:1;justify-content:center;height:44px}
+  @media(min-width:640px){.head-actions{width:auto;margin-top:0}.head-actions .act{flex:none}}
+  ul{list-style:none;margin:1.5rem 0 0;padding:0;display:grid;grid-template-columns:1fr;gap:.7rem}
+  @media(min-width:820px){ul{grid-template-columns:1fr 1fr;gap:.8rem}}
+  li{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:.75rem .85rem;
+    display:flex;align-items:center;gap:.85rem;transition:border-color .2s,background .2s}
+  li:hover{border-color:var(--primary);background:var(--surface-2)}
+  .num{flex:none;width:42px;height:42px;border-radius:10px;background:var(--surface-2);border:1px solid var(--border);
+    display:grid;place-items:center;font-weight:700;font-size:.95rem;font-variant-numeric:tabular-nums}
+  .info{flex:1;min-width:0}
+  .info .t{font-weight:600;font-size:1rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .info .s{color:var(--muted);font-size:.82rem;margin-top:.1rem;font-variant-numeric:tabular-nums}
+  .actions{display:flex;gap:.4rem;flex:none;align-items:center}
+  .act{height:42px;padding:0 .8rem;border-radius:10px;border:1px solid var(--border);background:var(--surface-2);
+    color:var(--fg);cursor:pointer;display:inline-flex;align-items:center;gap:.4rem;font:inherit;font-size:.85rem;
+    font-weight:600;text-decoration:none;transition:background .18s,border-color .18s,transform .12s;white-space:nowrap}
+  .act:hover{border-color:var(--primary)}.act:active{transform:scale(.95)}
+  .act:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+  .act.dl{background:var(--accent);border-color:var(--accent);color:#062a12}.act.dl:hover{background:var(--accent-hover)}
+  .act svg{width:18px;height:18px;flex:none}
+  @media(max-width:560px){.act .lbl{display:none}.act{padding:0;width:42px;justify-content:center}
+    .act.dl{width:auto;padding:0 .7rem}}
+  footer{color:var(--muted);font-size:.8rem;text-align:center;margin-top:2rem;line-height:1.7;max-width:640px;margin-inline:auto}
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;z-index:50;padding:1rem}
+  .modal.open{display:flex}
+  .modal-box{background:#000;border-radius:var(--radius);overflow:hidden;max-width:1000px;width:100%;border:1px solid var(--border)}
+  .modal video{width:100%;display:block;max-height:80vh;background:#000}
+  .modal-bar{display:flex;justify-content:space-between;align-items:center;padding:.6rem .9rem;background:var(--surface);gap:.8rem}
+  .modal-bar .name{font-size:.9rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .modal-close{background:none;border:none;color:var(--muted);cursor:pointer;font-size:1.6rem;line-height:1;flex:none}
+  .fallback{color:#fca5a5;font-size:.85rem;padding:.6rem .9rem;background:var(--surface);display:none}
+  .toast{position:fixed;bottom:1.25rem;left:50%;transform:translateX(-50%) translateY(1rem);background:var(--accent);
+    color:#062a12;font-weight:600;padding:.6rem 1.1rem;border-radius:999px;font-size:.9rem;opacity:0;pointer-events:none;
+    transition:opacity .25s,transform .25s;z-index:60}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
-<body><main>
-<h1>{html.escape(title or file_word)}</h1>
-<p class="hint">{html.escape(expires)}</p>
-{''.join(rows)}
-</main></body></html>
+<body>
+<header><div class="head-inner">
+  <div><h1 id="title"></h1><div class="meta" id="meta"></div></div>
+  <div class="timer" id="timer"><span class="dot"></span><span id="timer-text"></span></div>
+  <div class="head-actions"><button class="act" id="copy-all"></button></div>
+</div></header>
+<div class="wrap"><ul id="list"></ul><footer id="footer"></footer></div>
+<div class="modal" id="modal" role="dialog" aria-modal="true">
+  <div class="modal-box"><div class="modal-bar"><span class="name" id="modal-name"></span>
+    <button class="modal-close" id="modal-close" aria-label="X">&times;</button></div>
+    <video id="player" controls preload="metadata" playsinline></video>
+    <div class="fallback" id="fallback"></div></div></div>
+<div class="toast" id="toast"></div>
+<script>
+const DATA=/*__DATA__*/;const T=DATA.t;const enc=encodeURIComponent;const $=id=>document.getElementById(id);
+document.documentElement.lang=DATA.lang;document.documentElement.dir=DATA.dir;
+document.title=DATA.title;$("title").textContent=DATA.title;
+$("meta").textContent=`${DATA.count} ${T.count} · ${DATA.totalSize}`;
+$("footer").textContent=T.footer;$("fallback").textContent=T.cantPlay;
+const IC={play:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>',
+copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+dl:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>'};
+const base=location.href.replace(/[^/]*$/,"");
+$("copy-all").innerHTML=IC.copy+`<span class="lbl">${T.copyAll}</span>`;
+$("copy-all").onclick=()=>copy(DATA.items.map(it=>`${it.label}: ${base+enc(it.file)}`).join("\n"),T.copiedAll);
+const list=$("list");
+DATA.items.forEach((it,i)=>{const url=enc(it.file);const abs=base+url;const li=document.createElement("li");
+  li.innerHTML=`<div class="num">${i+1}</div><div class="info"><div class="t">${it.label}</div><div class="s">${it.size}</div></div>
+  <div class="actions"><button class="act play">${IC.play}<span class="lbl">${T.play}</span></button>
+  <button class="act copy">${IC.copy}<span class="lbl">${T.copy}</span></button>
+  <a class="act dl" href="${url}" download>${IC.dl}<span class="lbl">${T.download}</span></a></div>`;
+  li.querySelector(".play").onclick=()=>openPlayer(url,it.label);
+  li.querySelector(".copy").onclick=()=>copy(abs,T.copied);list.appendChild(li);});
+const modal=$("modal"),player=$("player"),fb=$("fallback");
+function openPlayer(url,name){$("modal-name").textContent=name;fb.style.display="none";player.src=url;modal.classList.add("open");player.play().catch(()=>{});}
+function closePlayer(){modal.classList.remove("open");player.pause();player.removeAttribute("src");player.load();}
+$("modal-close").onclick=closePlayer;modal.onclick=e=>{if(e.target===modal)closePlayer();};
+document.addEventListener("keydown",e=>{if(e.key==="Escape")closePlayer();});
+player.addEventListener("error",()=>{fb.style.display="block";});
+const toast=$("toast");
+async function copy(text,msg){try{await navigator.clipboard.writeText(text);}catch{const ta=document.createElement("textarea");ta.value=text;document.body.appendChild(ta);ta.select();document.execCommand("copy");ta.remove();}
+  toast.textContent=msg;toast.classList.add("show");clearTimeout(copy._t);copy._t=setTimeout(()=>toast.classList.remove("show"),1800);}
+const timer=$("timer"),tt=$("timer-text");
+function tick(){const left=DATA.deleteEpoch*1000-Date.now();if(left<=0){tt.textContent=T.deleted;timer.classList.add("warn");return;}
+  const h=Math.floor(left/3.6e6),m=Math.floor(left%3.6e6/6e4),s=Math.floor(left%6e4/1e3);
+  tt.innerHTML=`${T.deleteIn} <b>${h}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}</b>`;
+  timer.classList.toggle("warn",left<36e5);}
+tick();setInterval(tick,1000);
+</script>
+</body>
+</html>
 """
+
+
+def _ep_label(name: str, lang: str) -> str:
+    """A short episode label from a scene filename (SxxExx -> 'פרק N' / 'Ep. N'),
+    else the filename without extension."""
+    m = re.search(r"S\d+E(\d+)", name, re.I)
+    if m:
+        n = int(m.group(1))
+        return f"פרק {n}" if lang == "he" else f"Ep. {n}"
+    return os.path.splitext(name)[0]
+
+
+def _write_download_index(dest_dir: str, title: str, items: list[dict], lang: str) -> None:
+    he = lang == "he"
+    total = sum(int(i.get("size") or 0) for i in items)
+    data = {
+        "title": title or ("הורדות" if he else "Downloads"),
+        "dir": "rtl" if he else "ltr",
+        "lang": lang,
+        "count": len(items),
+        "totalSize": _fmt_size(total),
+        "deleteEpoch": int(time.time()) + 6 * 3600,   # matches the 6h rec-cleanup cronjob
+        "items": [{
+            "label": _ep_label(str(i.get("name") or "download"), lang),
+            "file": str(i.get("name") or "download"),
+            "size": _fmt_size(i.get("size") or 0),
+        } for i in items],
+        "t": {
+            "count": "פרטים" if he else "items",
+            "play": "נגן" if he else "Play",
+            "copy": "העתק" if he else "Copy",
+            "download": "הורד" if he else "Download",
+            "copyAll": "העתק את כל הקישורים" if he else "Copy all links",
+            "copied": "הקישור הועתק" if he else "Copied",
+            "copiedAll": "כל הקישורים הועתקו" if he else "All links copied",
+            "deleteIn": "נמחק בעוד" if he else "Deleted in",
+            "deleted": "נמחק" if he else "Deleted",
+            "cantPlay": ("הדפדפן לא הצליח לנגן את הקובץ - הורידו אותו במקום."
+                         if he else "Your browser can't play this file - download it instead."),
+            "footer": ("הקישורים זמניים ונמחקים במועד שבטיימר. צפייה בדפדפן נתמכת בחלק מהדפדפנים; אם לא מתנגן, הורידו."
+                       if he else "Links are temporary and expire at the timer. In-browser playback is best-effort; if it won't play, download."),
+        },
+    }
+    page = REC_PAGE_TEMPLATE.replace("/*__DATA__*/", json.dumps(data, ensure_ascii=False))
     with open(os.path.join(dest_dir, "index.html"), "w", encoding="utf-8") as f:
         f.write(page)
 
@@ -155,7 +274,9 @@ def publish_link(files: list[str], title: str = "", items: list[dict] | None = N
             published.append(next((i for i in items if i.get("path") == path), {"name": name}))
     if published:
         _write_download_index(dest_dir, title, published, lang)
-    return {"links": urls, "page_url": f"{REC_URL_BASE}/{token}/" if published else ""}
+    # link to index.html explicitly: the nginx vhost has autoindex off and serves it inline
+    # (a bare /token/ request 404s, and would download rather than render).
+    return {"links": urls, "page_url": f"{REC_URL_BASE}/{token}/index.html" if published else ""}
 
 
 def _download_link_kind(name: str, lang: str) -> str:
