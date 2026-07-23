@@ -598,8 +598,11 @@ async def launch_download(chat: int, uid: int, mid: int, *, service, title_id, p
     started = False
     try:
         try:
+            # Pass the name the user selected from search as an explicit title-name override, so the
+            # output filename is right even for services that can't resolve the name by id (e.g. STING).
             resp = await engine.download(service, title_id, profile=profile, wanted=wanted,
-                                         quality=quality, output_dir=outdir, **flags)
+                                         quality=quality, output_dir=outdir,
+                                         title_name=name or None, **flags)
         except UnshackleError as e:
             return await user_error(chat, mid, uid, e, allow_retry=not is_monitor)
         job_id = (resp.get("job_id") or resp.get("id")) if isinstance(resp, dict) else None
