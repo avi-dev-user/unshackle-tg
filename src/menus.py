@@ -460,6 +460,7 @@ async def show_tracks(chat: int, uid: int, mid: int, wanted):
             return await show_sub_langs(chat, uid, mid)
         return await pick_account_or_go(chat, uid, mid, "best")
     s.pop("tsel", None)                       # fresh selection (default all) per new title
+    s.pop("mediainfo", None)                  # MediaInfo defaults back to off for each new title
     await show_track_types(chat, uid, mid)
 
 
@@ -481,6 +482,11 @@ async def show_track_types(chat: int, uid: int, mid: int):
     if users.can_keys_download(uid) and state.meta(s["service"]).get("has_drm"):
         on = bool(s.get("keys_only"))
         rows.append([(("🔑 ✅ " if on else "🔑 ") + tr("KEYS_ONLY", lang), "kx_tog")])
+    # MediaInfo toggle (off -> add -> only): publish a full mediainfo report of the file to a
+    # telegra.ph page. 'add' = alongside the download; 'only' = just the report, then delete the file.
+    if not s.get("keys_only"):
+        mi_key = {None: "MEDIAINFO_OFF", "add": "MEDIAINFO_ADD", "only": "MEDIAINFO_ONLY"}[s.get("mediainfo")]
+        rows.append([("📋 " + tr(mi_key, lang), "mi_tog")])
     rows.append([(tr("CONTINUE", lang), "tt_go")])
     rows.append([(tr("MENU", lang), "m:main")])
 
@@ -692,6 +698,7 @@ async def _ready_to_start(chat: int, uid: int, mid: int, profile: str):
     s = sess(uid)
     s["dl_profile"] = profile
     if (users.delivery_mode(uid) == "telegram"
+            and s.get("mediainfo") != "only"            # 'only' deletes the file -> no send-as choice
             and "video" in to_sel(s.get("tsel"))
             and not s.get("_preflight_sendas_done")):
         s["_preflight_delivery_done"] = True

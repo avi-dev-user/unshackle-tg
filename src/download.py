@@ -16,7 +16,7 @@ from urllib.parse import quote
 
 import aiohttp
 
-from . import auth, config, gofile, keys_extract, metadata, state, uploader, users
+from . import auth, config, gofile, keys_extract, metadata, state, telegraph, uploader, users
 from .catalog_meta import can_use
 from .engine import UnshackleError
 from .errors import report_error, user_error
@@ -342,6 +342,49 @@ def _format_file_summary(items: list[dict], lang: str, details_limit: int = 3) -
     return "\n".join(lines)
 
 
+async def _publish_mediainfo(files: list[str], title: str, lang: str, outdir: str) -> list[str]:
+    """Build a real `mediainfo` report per downloaded file and publish it to telegra.ph page(s),
+    returning the page URL(s). Falls back to an nginx-hosted .txt link if Telegraph is unreachable,
+    and to [] if even that fails. Never raises - an 'add'-mode failure must not block the download
+    delivery. mediainfo runs in a thread so a big file doesn't block the poll loop."""
+    title = html.unescape(title or "")            # head_name is HTML-escaped; a page title is plain text
+    sections = []
+    for f in files:
+        if not os.path.exists(f):
+            continue
+        text = await asyncio.to_thread(metadata.mediainfo_report, f)
+        if text:
+            sections.append((os.path.basename(f), text))
+    if not sections:
+        return []
+    try:
+        return await telegraph.publish(title[:200] or "MediaInfo", sections)
+    except Exception as e:
+        print(f"telegraph publish failed, falling back to hosted txt: {e}")
+    try:
+        combined = "\n\n".join(f"===== {name} =====\n{text}" for name, text in sections)
+        txt_path = os.path.join(outdir, "mediainfo.txt")
+        with open(txt_path, "w", encoding="utf-8") as fp:
+            fp.write(combined)
+        pub = publish_link([txt_path], title=title,
+                           items=[{"path": txt_path, "name": "mediainfo.txt"}], lang=lang)
+        return pub.get("links") or []
+    except Exception as e:
+        print(f"mediainfo txt fallback failed: {e}")
+        return []
+
+
+def _format_mediainfo_links(links: list[str], lang: str) -> str:
+    if not links:
+        return ""
+    label = "📋 MediaInfo"
+    if len(links) == 1:
+        return f'{label}: <a href="{html.escape(links[0], quote=True)}">{tr("OPEN", lang)}</a>'
+    parts = ", ".join(f'<a href="{html.escape(u, quote=True)}">{i + 1}</a>'
+                      for i, u in enumerate(links))
+    return f"{label}: {parts}"
+
+
 # --------------------------------------------------------------------------
 # Job output helpers
 # --------------------------------------------------------------------------
@@ -490,7 +533,10 @@ async def start_download(chat: int, uid: int, mid: int, profile: str):
         return await edit(chat, mid, "⏳ " + tr("YOU_RE_ALREADY_DOWNLOADING", lang).format(limit=limit), [[(tr("MY_DOWNLOADS", lang), "m:dls")],
                           [(tr("MENU", lang), "m:main")]])
     keys_only = bool(s.get("keys_only"))
-    if not keys_only:
+    mediainfo_mode = s.get("mediainfo")            # None | "add" | "only"
+    # 'only' downloads the file just to read its mediainfo, then deletes it - so it has no delivery
+    # (no Telegram/link/gofile choice, no send-as). Skip the delivery preflight like keys-only does.
+    if not keys_only and mediainfo_mode != "only":
         name = s.get("name") or s.get("service", "") or tr("DOWNLOAD", lang)
         svc = s.get("service", "")
         head_name = html.escape(str(name))[:48] + (f" · 📺 {html.escape(svc)}" if svc else "")
@@ -522,9 +568,10 @@ async def start_download(chat: int, uid: int, mid: int, profile: str):
                           description=s.get("description", ""), upload_date=s.get("upload_date", ""),
                           cover_url=s.get("cover_url", ""), keys_only=keys_only,
                           delivery_link=delivery_link, gofile_upload=False,
-                          gofile_only=gofile_only)
+                          gofile_only=gofile_only, mediainfo=mediainfo_mode)
     for k in ("_preflight_delivery_done", "_preflight_gofile_done", "_preflight_sendas_done",
-              "_sub_lang_chosen", "_vcodec_chosen", "delivery_link", "gofile", "gofile_only", "vcodec"):
+              "_sub_lang_chosen", "_vcodec_chosen", "delivery_link", "gofile", "gofile_only",
+              "vcodec", "mediainfo"):
         s.pop(k, None)
 
 
@@ -558,7 +605,7 @@ async def launch_download(chat: int, uid: int, mid: int, *, service, title_id, p
                           quality, flags, name, src_url=None, source_media="", retried=False,
                           send_as=None, cover=None, is_monitor=False, gate=True,
                           description="", upload_date="", cover_url="", keys_only=False,
-                          delivery_link=None, gofile_upload=None, gofile_only=None):
+                          delivery_link=None, gofile_upload=None, gofile_only=None, mediainfo=None):
     """Submit a download to the engine and start polling it. The single submit seam shared by
     the wizard and the auto-monitor: validates the profile, atomically reserves a concurrency
     slot (gate=True), and carries a dl_spec for the geofence proxy retry (which passes gate=False
@@ -584,7 +631,8 @@ async def launch_download(chat: int, uid: int, mid: int, *, service, title_id, p
                                source_media=source_media, send_as=send_as, cover=cover,
                                description=description, upload_date=upload_date, cover_url=cover_url,
                                keys_only=keys_only, delivery_link=delivery_link,
-                               gofile_upload=gofile_upload, gofile_only=gofile_only)
+                               gofile_upload=gofile_upload, gofile_only=gofile_only,
+                               mediainfo=mediainfo)
     jobs = active_jobs.setdefault(uid, {})
     resv = None
     if gate:                                       # atomic check + reserve, no await in between
@@ -615,7 +663,8 @@ async def launch_download(chat: int, uid: int, mid: int, *, service, title_id, p
                 "send_as": send_as, "cover": cover, "is_monitor": is_monitor,
                 "description": description, "upload_date": upload_date, "cover_url": cover_url,
                 "keys_only": keys_only, "delivery_link": delivery_link,
-                "gofile_upload": gofile_upload, "gofile_only": gofile_only}
+                "gofile_upload": gofile_upload, "gofile_only": gofile_only,
+                "mediainfo": mediainfo}
         asyncio.create_task(poll_job(chat, uid, mid, job_id, outdir, src_url=src_url,
                                      source_media=source_media, dl_spec=spec, is_monitor=is_monitor))
     finally:
@@ -734,7 +783,8 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                     upload_date=dl_spec.get("upload_date", ""), cover_url=dl_spec.get("cover_url", ""),
                     delivery_link=dl_spec.get("delivery_link"),
                     gofile_upload=dl_spec.get("gofile_upload"),
-                    gofile_only=dl_spec.get("gofile_only"))
+                    gofile_only=dl_spec.get("gofile_only"),
+                    mediainfo=dl_spec.get("mediainfo"))
             elif (now - stall["t"] > PROXY_STALL_SECS and prog < 50 and dl_spec
                   and not dl_spec.get("keys_only")
                   and not dl_spec["flags"].get("no_proxy_download")):
@@ -771,6 +821,24 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
             src_name = (urlparse(src_url).hostname or "").replace("www.", "") or src_url or "?"
             total = len(files)
             has_big = any(os.path.getsize(f) > uploader.max_cap() for f in files if os.path.exists(f))
+            # MediaInfo: build a real report of the downloaded file(s) and publish it to telegra.ph.
+            # 'only' = the user just wanted the info -> publish, delete the files, send the link.
+            # 'add'  = publish alongside the normal delivery, appending the link to the result below.
+            mi_mode = (dl_spec or {}).get("mediainfo")
+            mi_block = ""
+            if mi_mode:
+                await edit(chat, mid, f"🎬 {head_name}\n📋 " + tr("BUILDING_MEDIAINFO", lang))
+                mi_links = await _publish_mediainfo(files, head_name, lang, outdir)
+                if mi_mode == "only":
+                    shutil.rmtree(outdir, ignore_errors=True)
+                    if mi_links:
+                        msg = "📋 " + tr("MEDIAINFO_READY", lang) + "\n\n" \
+                            + _format_mediainfo_links(mi_links, lang)
+                    else:
+                        msg = "⚠️ " + tr("MEDIAINFO_FAILED", lang)
+                    await edit(chat, mid, msg, [[(tr("MENU", lang), "m:main")]])
+                    return
+                mi_block = _format_mediainfo_links(mi_links, lang)
             # Primary delivery choice: a self-hosted, expiring download link instead of a Telegram
             # upload (telegram/link/ask per the user's setting). 'link' is also the natural path for
             # over-cap files (no Telegram size limit on a direct link).
@@ -818,6 +886,8 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                 if link_block:
                     msg += "\n\n" + link_block
                 msg += "\n\n" + tr("REC_LINK_EXPIRES", lang)
+                if mi_block:
+                    msg += "\n\n" + mi_block
                 await edit(chat, mid, msg, [[(tr("MENU", lang), "m:main")]])
                 return
             # gofile delivery: the user picked it (gofile_only), or an over-cap file reached here
@@ -941,6 +1011,8 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                 if summary:
                     msg += "\n\n" + summary
                 msg += "\n\n🔗 " + tr("GOFILE_READY", lang) + f"\n{gf_link}"
+            if mi_block:
+                msg += "\n\n" + mi_block
             await edit(chat, mid, msg, [[(tr("MENU", lang), "m:main")]])
             return
         if status == "failed":
@@ -971,7 +1043,8 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                     keys_only=dl_spec.get("keys_only", False),
                     delivery_link=dl_spec.get("delivery_link"),
                     gofile_upload=dl_spec.get("gofile_upload"),
-                    gofile_only=dl_spec.get("gofile_only"))
+                    gofile_only=dl_spec.get("gofile_only"),
+                    mediainfo=dl_spec.get("mediainfo"))
             await user_error(chat, mid, uid, detail, allow_retry=not is_monitor)
             return
     shutil.rmtree(outdir, ignore_errors=True)

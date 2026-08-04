@@ -32,6 +32,27 @@ def _ffprobe(path: str) -> dict:
         return {}
 
 
+def mediainfo_report(path: str) -> str:
+    """Full `mediainfo` text report for a downloaded file (scene-style, all tracks). The tool
+    prints the file's absolute server path in 'Complete name' - replace it with the bare filename
+    so a published (public) report never leaks the server's directory layout. Returns "" on any
+    failure (missing binary, unreadable file), so callers can fall back cleanly."""
+    try:
+        # LC_ALL=C so mediainfo emits its English field labels regardless of the host locale -
+        # the redaction below matches the literal "Complete name" label.
+        out = subprocess.run(["mediainfo", path], capture_output=True, text=True, timeout=120,
+                             env={**os.environ, "LC_ALL": "C"})
+    except Exception:
+        return ""
+    text = out.stdout or ""
+    if not text.strip():
+        return ""
+    base = os.path.basename(path)
+    # callable replacement so a filename containing a backslash isn't read as a regex escape
+    return re.sub(r"^(Complete name\s*:).*$", lambda m: f"{m.group(1)} {base}", text,
+                  count=1, flags=re.M)
+
+
 def _dur(seconds: float) -> str:
     s = int(float(seconds or 0))
     h, rem = divmod(s, 3600)

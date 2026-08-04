@@ -7,7 +7,7 @@ WORKDIR /app
 # System deps: ffmpeg (probe/mux/split), mkvtoolnix/aria2, git, curl/certs, supervisor,
 # build-essential (compiles tgcrypto's C extension, no wheel on slim), unzip.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ffmpeg mkvtoolnix aria2 git curl ca-certificates supervisor build-essential unzip \
+        ffmpeg mkvtoolnix mediainfo aria2 git curl ca-certificates supervisor build-essential unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # DRM/download binaries unshackle needs that aren't in apt:

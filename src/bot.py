@@ -516,6 +516,9 @@ async def on_callback(cq: dict):
             return
         sess(uid)["keys_only"] = not sess(uid).get("keys_only")
         return await show_track_types(chat, uid, mid)
+    if data == "mi_tog":                                    # cycle MediaInfo mode: off -> add -> only
+        sess(uid)["mediainfo"] = {None: "add", "add": "only", "only": None}[sess(uid).get("mediainfo")]
+        return await show_track_types(chat, uid, mid)
     if data == "tt:back":
         return await show_track_types(chat, uid, mid)
     if data == "tt_go":                                     # continue with the checked tracks
