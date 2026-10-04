@@ -80,3 +80,7 @@ them on every push (`.github/workflows/ci.yml`).
 ## License
 
 [GPL-3.0](LICENSE). See also the [DISCLAIMER](DISCLAIMER.md).
+
+### Private live-channel key configuration
+
+Set `KAN_CLEARKEY` in your private deployment environment when initializing live channels that require a key. No key is bundled in the source. Existing `kan_channels.json` configuration is preserved; changing this environment variable does not overwrite saved channel keys. Keep credentials and channel keys out of Git.

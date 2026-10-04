@@ -68,9 +68,10 @@ async def _probe_bps(url: str, key: str) -> int:
 # channel store
 # --------------------------------------------------------------------------
 # Kan live channels work over the IL datacenter proxy (the live CDN isn't Cloudflare-gated like the
-# VOD page is). They share one ClearKey. Seeded on first run; fully editable/removable afterwards.
+# VOD page is). Set KAN_CLEARKEY privately for initial channel configuration.
+# Existing channel configuration is preserved and can be edited or removed afterwards.
 _LIVX = "https://kancdn.medonecdn.net/livedash/oil/kancdn-live/live/{ch}/live.livx?indexMode&futc&relativePaths"
-_KAN_KEY = "REDACTED_MEDIA_KEY"
+_KAN_KEY = os.environ.get("KAN_CLEARKEY", "")
 SEED_CHANNELS = {
     "Kan 11":  {"url": _LIVX.format(ch="kan11"),  "key": _KAN_KEY},
     "Kan 4K":  {"url": _LIVX.format(ch="kan_4k"), "key": _KAN_KEY},
