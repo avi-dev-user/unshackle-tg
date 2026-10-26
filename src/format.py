@@ -74,7 +74,11 @@ _LANG_NAMES = {
 }
 
 
-def _lang_label(code: str, lang: str = "en") -> str:
-    base = (code or "").split("-")[0].lower()
+def _lang_label(code, lang: str = "en") -> str:
+    # unshackle reports skipped subtitles as {"id", "language", "title"} dicts, not bare codes
+    if isinstance(code, dict):
+        code = code.get("language") or code.get("id") or ""
+    code = str(code or "")
+    base = code.split("-")[0].lower()
     name = _LANG_NAMES.get(lang, _LANG_NAMES["en"]).get(base)
     return f"{name} ({code})" if name else code
