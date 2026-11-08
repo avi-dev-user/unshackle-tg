@@ -3,6 +3,36 @@ Shared by the download and upload paths. Language-dependent bits take a `lang` a
 from .i18n import tr
 
 
+def flatten_tracks(tracks) -> dict:
+    """Normalise a list-tracks reply to one {video, audio, subtitles, title} view.
+
+    One episode returns {video, audio, subtitles, title}. A whole season or series returns
+    {"episodes": [{title, video, audio, subtitles}, ...]} and has no top-level track lists, so
+    reading it the single-episode way finds nothing and the wizard says "no tracks". For a
+    multi-episode reply the track lists are merged, de-duplicated by (language, codec, height),
+    so the pickers show what the episodes offer. `title` is the first episode's.
+    """
+    if not isinstance(tracks, dict):
+        return {"video": [], "audio": [], "subtitles": [], "title": {}}
+    eps = tracks.get("episodes")
+    if not eps:
+        return tracks
+    out = {"video": [], "audio": [], "subtitles": [], "title": {}}
+    seen = {"video": set(), "audio": set(), "subtitles": set()}
+    for ep in eps:
+        if not isinstance(ep, dict):
+            continue
+        if not out["title"] and isinstance(ep.get("title"), dict):
+            out["title"] = ep["title"]
+        for kind in ("video", "audio", "subtitles"):
+            for t in ep.get(kind) or []:
+                key = (t.get("language"), t.get("codec"), t.get("height"), t.get("bitrate"))
+                if key not in seen[kind]:
+                    seen[kind].add(key)
+                    out[kind].append(t)
+    return out
+
+
 def _bar(pct, width: int = 14) -> str:
     pct = max(0, min(100, int(pct or 0)))
     filled = round(pct * width / 100)
