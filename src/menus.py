@@ -11,7 +11,7 @@ from .catalog_meta import (can_use, categorise, svc_auth_methods, svc_auth_requi
 from .download import start_download, to_sel
 from .engine import UnshackleError
 from .errors import user_error
-from .format import _lang_label
+from .format import _lang_label, flatten_tracks
 from .i18n import LANGS, tr
 from .session import active_jobs, sess
 from .state import engine
@@ -407,6 +407,7 @@ async def show_tracks(chat: int, uid: int, mid: int, wanted):
                                           credential=auth.first_credential(uid, s["service"]))
     except UnshackleError as e:
         return await user_error(chat, mid, uid, e)
+    tracks = flatten_tracks(tracks)          # a season/series reply is {"episodes": [...]}
     videos = tracks.get("video", []) if isinstance(tracks, dict) else []
     s["heights"] = sorted({v["height"] for v in videos if v.get("height")}, reverse=True)
     vcodecs = {}
