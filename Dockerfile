@@ -38,7 +38,7 @@ RUN pip install --no-cache-dir \
     && pip install --no-cache-dir --force-reinstall --no-deps \
         "subby @ git+https://github.com/vevv/subby.git@1ea6a52028c5bea8177c8abc91716d74e4d097e1" \
     # Keep the engine's pinned cryptography (<46, for pyplayready) + curl-cffi (<0.14) so DRM works.
-    && pip install --no-cache-dir "cryptography<46" "curl-cffi<0.14" \
+    && pip install --no-cache-dir "cryptography<46" "curl-cffi<0.14" "pycaption==2.2.26" \
     && python -c "import unshackle, yt_dlp, cryptography, curl_cffi, subby, xmltodict; print('engine deps OK')" \
     && playwright install --with-deps chromium
 
