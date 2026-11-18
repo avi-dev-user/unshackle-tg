@@ -254,6 +254,7 @@ async def on_callback(cq: dict):
         if idx >= len(results):
             return await edit(chat, mid, tr("EXPIRED_SEARCH_AGAIN", lang), [[(tr("SEARCH", lang), "m:search")]])
         s["service"] = s.get("search_service")
+        s["selected_title_name"] = results[idx].get("title") or ""
         return await show_titles(chat, uid, results[idx]["id"])
     if data.startswith("sp:"):                    # search results: page nav
         sess(uid)["search_page"] = int(data.split(":", 1)[1])
