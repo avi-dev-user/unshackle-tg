@@ -45,6 +45,9 @@ ADMIN_IDS = _ids("ADMIN_IDS")
 
 # --- unshackle REST API ---
 UNSHACKLE_API = os.environ.get("UNSHACKLE_API", "http://127.0.0.1:8786/api").rstrip("/")
+UNSHACKLE_DSNP_API = os.environ.get("UNSHACKLE_DSNP_API", "").rstrip("/")
+UNSHACKLE_DSNP_PROXY = os.environ.get("UNSHACKLE_DSNP_PROXY", "").strip()
+UNSHACKLE_DSNP_DOWNLOAD_PROXY = os.environ.get("UNSHACKLE_DSNP_DOWNLOAD_PROXY", "").strip()
 UNSHACKLE_API_KEY = os.environ.get("UNSHACKLE_API_KEY", "")
 
 # Region tag on the manual "manifest + keys" JSON catalog export - the JSON service treats
