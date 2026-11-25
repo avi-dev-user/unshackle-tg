@@ -17,6 +17,10 @@ Verified endpoints (unshackle 4.0):
 import asyncio
 from typing import Any, Optional
 
+# Jobs are process-local already; keep their engine affinity beside the client. If the bot
+# restarts, job() also has a DSNP fallback so an in-flight official-DSNP job remains visible.
+_DSNP_JOBS: set[str] = set()
+
 import aiohttp
 
 from . import config
@@ -38,7 +42,20 @@ class Engine:
         return h
 
     async def _request(self, method: str, path: str, json: dict = None) -> Any:
-        url = f"{self.base}{path}"
+        # Official DSNP runs on a separate Python 3.13/unshackle 6 engine. Every other
+        # service stays on the existing 5.x engine. The request body is the routing key.
+        service = str((json or {}).get("service") or "").upper()
+        if service == "DSNP" and config.UNSHACKLE_DSNP_PROXY and json is not None:
+            # The bot's segment proxy may be a localhost forwarder available only in its own pod.
+            # DSNP runs in a separate pod, so always replace it with that engine's residential URL.
+            json["proxy"] = config.UNSHACKLE_DSNP_PROXY
+            if config.UNSHACKLE_DSNP_DOWNLOAD_PROXY:
+                json["proxy_download"] = config.UNSHACKLE_DSNP_DOWNLOAD_PROXY
+        base = config.UNSHACKLE_DSNP_API if service == "DSNP" and config.UNSHACKLE_DSNP_API else self.base
+        return await self._request_at(base, method, path, json)
+
+    async def _request_at(self, base: str, method: str, path: str, json: dict = None) -> Any:
+        url = f"{base}{path}"
         # bounded timeout so a hung engine can't wedge the single long-poll loop (these are
         # quick control-plane calls - submit/list/status/cancel; the download itself is polled)
         try:
@@ -99,12 +116,26 @@ class Engine:
             body["wanted"] = wanted
         if quality:
             body["quality"] = quality
-        return await self._request("POST", "/download", body)
+        result = await self._request("POST", "/download", body)
+        if service.upper() == "DSNP":
+            job_id = result.get("job_id") or result.get("id") if isinstance(result, dict) else None
+            if job_id:
+                _DSNP_JOBS.add(str(job_id))
+        return result
 
     async def job(self, job_id: str) -> dict:
-        return await self._request("GET", f"/download/jobs/{job_id}")
+        if str(job_id) in _DSNP_JOBS and config.UNSHACKLE_DSNP_API:
+            return await self._request_at(config.UNSHACKLE_DSNP_API, "GET", f"/download/jobs/{job_id}")
+        try:
+            return await self._request("GET", f"/download/jobs/{job_id}")
+        except UnshackleError as exc:
+            if config.UNSHACKLE_DSNP_API and "not found" in str(exc).lower():
+                return await self._request_at(config.UNSHACKLE_DSNP_API, "GET", f"/download/jobs/{job_id}")
+            raise
 
     async def cancel(self, job_id: str) -> dict:
+        if str(job_id) in _DSNP_JOBS and config.UNSHACKLE_DSNP_API:
+            return await self._request_at(config.UNSHACKLE_DSNP_API, "DELETE", f"/download/jobs/{job_id}")
         return await self._request("DELETE", f"/download/jobs/{job_id}")
 
     async def health(self) -> Optional[dict]:
