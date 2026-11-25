@@ -45,12 +45,18 @@ class Engine:
         # Official DSNP runs on a separate Python 3.13/unshackle 6 engine. Every other
         # service stays on the existing 5.x engine. The request body is the routing key.
         service = str((json or {}).get("service") or "").upper()
-        if service == "DSNP" and config.UNSHACKLE_DSNP_PROXY and json is not None:
-            # The bot's segment proxy may be a localhost forwarder available only in its own pod.
-            # DSNP runs in a separate pod, so always replace it with that engine's residential URL.
-            json["proxy"] = config.UNSHACKLE_DSNP_PROXY
+        if service == "DSNP" and json is not None:
+            if config.UNSHACKLE_DSNP_PROXY:
+                # The bot's segment proxy may be a localhost forwarder available only in its own pod.
+                # DSNP runs in a separate pod, so always replace it with that engine's residential URL.
+                json["proxy"] = config.UNSHACKLE_DSNP_PROXY
             if config.UNSHACKLE_DSNP_DOWNLOAD_PROXY:
                 json["proxy_download"] = config.UNSHACKLE_DSNP_DOWNLOAD_PROXY
+            # The DSNP engine is a separate pod. Rewrite the bot-local job path onto a hostPath
+            # mounted at the same location in both pods, so uploader.deliver can read the result.
+            output_dir = json.get("output_dir")
+            if output_dir:
+                json["output_dir"] = "/data/dsnp-downloads/" + str(output_dir).rstrip("/").rsplit("/", 1)[-1]
         base = config.UNSHACKLE_DSNP_API if service == "DSNP" and config.UNSHACKLE_DSNP_API else self.base
         return await self._request_at(base, method, path, json)
 
