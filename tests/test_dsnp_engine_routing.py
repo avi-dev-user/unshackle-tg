@@ -17,10 +17,11 @@ def test_dsnp_routes_to_the_separate_engine():
         app=web.Application();app.router.add_post('/api/list-titles',handler)
         runner=web.AppRunner(app);await runner.setup();site=web.TCPSite(runner,'127.0.0.1',unused_tcp_port);await site.start()
         old=config.UNSHACKLE_DSNP_API;config.UNSHACKLE_DSNP_API=f'http://127.0.0.1:{unused_tcp_port}/api'
-        try: await Engine('http://127.0.0.1:1/api').list_titles('DSNP','entity-x')
+        try: await Engine('http://127.0.0.1:1/api').list_titles('DSNP','entity-x',output_dir='/data/downloads/job-123')
         finally: config.UNSHACKLE_DSNP_API=old;await runner.cleanup()
     asyncio.run(run())
     assert seen and seen[0][1]['service']=='DSNP'
+    assert seen[0][1]['output_dir'] == '/data/dsnp-downloads/job-123'
 
 
 def test_non_dsnp_keeps_primary_engine():
