@@ -16,7 +16,7 @@ from urllib.parse import quote
 
 import aiohttp
 
-from . import auth, config, gofile, keys_extract, metadata, state, telegraph, uploader, users
+from . import auth, config, gofile, keys_extract, metadata, state, subszone, telegraph, uploader, users
 from .catalog_meta import can_use
 from .engine import UnshackleError
 from .errors import report_error, user_error
@@ -817,6 +817,13 @@ async def _poll_job(chat: int, uid: int, mid: int, job_id: str, outdir: str, src
                 await edit(chat, mid, "🎉 " + tr("DONE_BUT_NO_FILE", lang), [[(tr("MENU", lang), "m:main")]])
                 return
             total_bytes = sum(os.path.getsize(f) for f in files if os.path.exists(f))   # before upload/cleanup
+            subtitle_files = [f for f in files if os.path.exists(f) and subszone.is_subtitle(f)]
+            if subtitle_files:
+                await asyncio.gather(*(
+                    subszone.upload(f, release=os.path.splitext(os.path.basename(f))[0],
+                                    notes=f"Imported automatically from {(dl_spec or {}).get('service') or 'unshackle'}")
+                    for f in subtitle_files
+                ))
             from urllib.parse import urlparse
             src_name = (urlparse(src_url).hostname or "").replace("www.", "") or src_url or "?"
             total = len(files)

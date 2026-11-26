@@ -50,6 +50,14 @@ UNSHACKLE_DSNP_PROXY = os.environ.get("UNSHACKLE_DSNP_PROXY", "").strip()
 UNSHACKLE_DSNP_DOWNLOAD_PROXY = os.environ.get("UNSHACKLE_DSNP_DOWNLOAD_PROXY", "").strip()
 UNSHACKLE_API_KEY = os.environ.get("UNSHACKLE_API_KEY", "")
 
+# --- SubsZone automatic subtitle publication ---
+SUBSZONE_API_BASE = os.environ.get("SUBSZONE_API_BASE", "").rstrip("/")
+SUBSZONE_API_HOST = os.environ.get("SUBSZONE_API_HOST", "")
+SUBSZONE_API_TOKEN = os.environ.get("SUBSZONE_API_TOKEN", "")
+SUBSZONE_UPLOAD_TIMEOUT = int(os.environ.get("SUBSZONE_UPLOAD_TIMEOUT") or 120)
+SUBSZONE_POLL_SECONDS = int(os.environ.get("SUBSZONE_POLL_SECONDS") or 5)
+SUBSZONE_POLL_ATTEMPTS = int(os.environ.get("SUBSZONE_POLL_ATTEMPTS") or 120)
+
 # Region tag on the manual "manifest + keys" JSON catalog export - the JSON service treats
 # this as its GEOFENCE, so it decides which configured proxy_providers entry to route through.
 KEYS_DOWNLOAD_REGION = os.environ.get("KEYS_DOWNLOAD_REGION", "IL")
