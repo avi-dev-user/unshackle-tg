@@ -28,7 +28,10 @@ def idempotency_key(path: str) -> str:
 
 
 def _headers(**extra) -> dict[str, str]:
-    return {"Authorization": f"Bearer {config.SUBSZONE_API_TOKEN}", **extra}
+    headers = {"Authorization": f"Bearer {config.SUBSZONE_API_TOKEN}", **extra}
+    if config.SUBSZONE_API_HOST:
+        headers["Host"] = config.SUBSZONE_API_HOST
+    return headers
 
 
 async def _json(response: aiohttp.ClientResponse) -> dict:
