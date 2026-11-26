@@ -83,7 +83,19 @@ class Engine:
     # --- discovery ---
     async def services(self) -> list[dict]:
         data = await self._request("GET", "/services")
-        return data.get("services", []) if isinstance(data, dict) else (data or [])
+        services = data.get("services", []) if isinstance(data, dict) else (data or [])
+        if config.UNSHACKLE_DSNP_API:
+            try:
+                extra = await self._request_at(config.UNSHACKLE_DSNP_API, "GET", "/services")
+                extra = extra.get("services", []) if isinstance(extra, dict) else (extra or [])
+                by_tag = {item.get("tag"): item for item in services if item.get("tag")}
+                for item in extra:
+                    if item.get("tag") == "DSNP":
+                        by_tag["DSNP"] = item
+                services = list(by_tag.values())
+            except UnshackleError:
+                pass  # keep the primary catalog available if the isolated engine is restarting
+        return services
 
     async def list_titles(self, service: str, title_id: str, profile: str = None, **extra) -> list[dict]:
         body = {"service": service, "title_id": title_id, **extra}
